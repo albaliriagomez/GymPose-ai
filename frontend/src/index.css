@@ -1,0 +1,31 @@
+@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background-color: #0a0f1a;
+  color: #e2e8f0;
+  font-family: 'DM Sans', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: #0d1424; }
+::-webkit-scrollbar-thumb { background: #1e2d45; border-radius: 2px; }
+
+.glow-cyan { box-shadow: 0 0 20px rgba(0,229,255,0.25); }
+.glow-green { box-shadow: 0 0 20px rgba(0,255,136,0.25); }
+.text-glow-cyan { text-shadow: 0 0 20px rgba(0,229,255,0.5); }
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-fadeInUp  { animation: fadeInUp 0.4s ease both; }
+.delay-100 { animation-delay: 0.1s; }
+.delay-200 { animation-delay: 0.2s; }
+.delay-300 { animation-delay: 0.3s; }
