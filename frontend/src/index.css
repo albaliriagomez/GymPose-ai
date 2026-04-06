@@ -29,3 +29,26 @@ body {
 .delay-100 { animation-delay: 0.1s; }
 .delay-200 { animation-delay: 0.2s; }
 .delay-300 { animation-delay: 0.3s; }
+
+
+/* Brillo para los puntos de las articulaciones (Keypoints) */
+.glow-cyan-sm { 
+  filter: drop-shadow(0 0 5px rgba(0, 242, 255, 0.8)); 
+}
+
+/* Efecto de escaneo para la imagen procesada */
+.scan-line {
+  width: 100%;
+  height: 2px;
+  background: linear-gradient(to right, transparent, #00f2ff, transparent);
+  position: absolute;
+  top: 0;
+  left: 0;
+  animation: scan 2s linear infinite;
+  z-index: 10;
+}
+
+@keyframes scan {
+  0% { top: 0%; }
+  100% { top: 100%; }
+}
