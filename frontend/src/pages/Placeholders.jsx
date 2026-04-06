@@ -1,4 +1,5 @@
 import DashboardLayout from '../components/DashboardLayout'
+import NutritionModule from './Nutrition'
 
 const Page = ({ title }) => (
   <DashboardLayout>
@@ -12,5 +13,9 @@ const Page = ({ title }) => (
 )
 
 export const Posture   = () => <Page title="Analizador Postural" />
-export const Nutrition = () => <Page title="Dieta & Nutrición" />
+export const Nutrition = () => (
+  <DashboardLayout>
+    <NutritionModule />
+  </DashboardLayout>
+)
 export const Settings  = () => <Page title="Ajustes" />
