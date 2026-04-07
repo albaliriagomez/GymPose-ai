@@ -9,7 +9,8 @@ import Login from './pages/Login'
 import Register from './pages/Register'
 import Dashboard from './pages/Dashboard'
 import Training from './pages/Training'
-import { Posture, Nutrition, Settings } from './pages/Placeholders'
+import { Nutrition, Settings } from './pages/Placeholders'
+import Posture from './pages/Posture'
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
