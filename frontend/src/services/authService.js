@@ -1,6 +1,6 @@
 import axios from 'axios'
 
-const API_URL = 'http://localhost:8000'
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
 const api = axios.create({
   baseURL: API_URL,
@@ -13,31 +13,62 @@ api.interceptors.request.use((config) => {
   return config
 })
 
-export const login = async (email, password) => {
-  // DEMO hardcodeado — funciona sin backend
-  if (email === 'alex@gympose.com' && password === 'demo1234') {
-    const user = { name: 'Alex', email }
-    localStorage.setItem('gympose_token', 'demo_token_123')
-    localStorage.setItem('gympose_user', JSON.stringify(user))
-    return { token: 'demo_token_123', user }
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      localStorage.removeItem('gympose_token')
+      localStorage.removeItem('gympose_user')
+      window.location.href = '/login'
+    }
+    return Promise.reject(error)
   }
+)
+
+export const register = async (userData) => {
   try {
-    const { data } = await api.post('/auth/login', { email, password })
-    localStorage.setItem('gympose_token', data.token)
+    const { data } = await api.post('/auth/register', userData)
+    localStorage.setItem('gympose_token', data.access_token)
     localStorage.setItem('gympose_user', JSON.stringify(data.user))
     return data
   } catch (err) {
-    throw new Error(err.response?.data?.message || 'Credenciales incorrectas')
+    const errorMessage = err.response?.data?.detail || 'Error al registrarse'
+    throw new Error(errorMessage)
   }
 }
 
-export const register = async (data) => {
-  if (data.email === 'alex@gympose.com') throw new Error('Este email ya está registrado')
+export const login = async (email, password) => {
   try {
-    const res = await api.post('/auth/register', data)
-    return res.data
+    const { data } = await api.post('/auth/login', { email, password })
+    localStorage.setItem('gympose_token', data.access_token)
+    localStorage.setItem('gympose_user', JSON.stringify(data.user))
+    return data
   } catch (err) {
-    throw new Error(err.response?.data?.message || 'Error al registrarse')
+    const errorMessage = err.response?.data?.detail || 'Email o contraseña incorrectos'
+    throw new Error(errorMessage)
+  }
+}
+
+export const fetchUserProfile = async (token) => {
+  try {
+    const { data } = await api.get('/auth/me', {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+    return data
+  } catch (err) {
+    throw new Error(err.response?.data?.detail || 'Error al obtener perfil')
+  }
+}
+
+export const updateProfile = async (updateData, token) => {
+  try {
+    const { data } = await api.put('/auth/me', updateData, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+    localStorage.setItem('gympose_user', JSON.stringify(data))
+    return data
+  } catch (err) {
+    throw new Error(err.response?.data?.detail || 'Error al actualizar perfil')
   }
 }
 
@@ -46,7 +77,17 @@ export const logout = () => {
   localStorage.removeItem('gympose_user')
 }
 
-export const getUser        = () => { const u = localStorage.getItem('gympose_user'); return u ? JSON.parse(u) : null }
-export const isAuthenticated = () => !!localStorage.getItem('gympose_token')
+export const getUser = () => {
+  const user = localStorage.getItem('gympose_user')
+  return user ? JSON.parse(user) : null
+}
+
+export const getToken = () => {
+  return localStorage.getItem('gympose_token')
+}
+
+export const isAuthenticated = () => {
+  return !!localStorage.getItem('gympose_token')
+}
 
 export default api
