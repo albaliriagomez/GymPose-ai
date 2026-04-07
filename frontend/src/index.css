@@ -52,3 +52,7 @@ body {
   0% { top: 0%; }
   100% { top: 100%; }
 }
+
+.camera-mirror {
+  transform: scaleX(-1);
+}
