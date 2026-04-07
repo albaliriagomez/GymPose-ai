@@ -1,12 +1,9 @@
 import React from 'react';
 
 /**
- * TipCard Component
- * Displays an AI-generated nutrition tip with a distinctive border and styling
- * 
- * @param {string} title - Title of the tip (default: "Hidratación Inteligente")
- * @param {string} content - Main content/description text
- * @param {JSX.Element} waterWidget - Water monitoring widget to include below content
+ * @param {string} title 
+ * @param {string} content
+ * @param {JSX.Element} waterWidget
  */
 const TipCard = ({
   title = "Hidratación Inteligente",
@@ -15,7 +12,7 @@ const TipCard = ({
 }) => {
   return (
     <div className="relative rounded-lg border border-gym-cyan bg-gym-card p-6 backdrop-blur-sm animate-glow-pulse transition-all duration-300">
-      {/* Tip header with icon */}
+      {/*Tip header with icon*/}
       <div className="flex items-center gap-2 mb-4 animate-slide-in-right animation-delay-100">
         <div className="w-5 h-5 text-gym-cyan animate-bounce" style={{ animationDuration: '2s' }}>
           <svg
@@ -31,24 +28,24 @@ const TipCard = ({
         </span>
       </div>
 
-      {/* Title */}
+      {/*Title*/}
       <h3 className="text-xl font-bold text-gym-yellow mb-3 leading-tight animate-slide-in-right animation-delay-150">
         {title}
       </h3>
 
-      {/* Content text */}
+      {/*Content*/}
       <p className="text-sm text-gym-text leading-relaxed mb-5 text-justify">
         {content}
       </p>
 
-      {/* Water widget */}
+      {/*Water widget*/}
       {waterWidget && (
         <div className="mt-6 pt-4 border-t border-gym-cyan border-opacity-20">
           {waterWidget}
         </div>
       )}
 
-      {/* Decorative corner accent */}
+      {/*Decorative corner accent*/}
       <div className="absolute top-0 right-0 w-20 h-20 bg-gym-cyan opacity-5 rounded-full blur-2xl -mr-10 -mt-10 pointer-events-none" />
     </div>
   );
