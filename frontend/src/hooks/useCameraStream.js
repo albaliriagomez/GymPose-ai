@@ -12,6 +12,7 @@ const DEFAULT_CONSTRAINTS = {
 export function useCameraStream(videoRef) {
   const [status, setStatus] = useState('idle')
   const [error, setError] = useState('')
+  const [isStarting, setIsStarting] = useState(false)
 
   useEffect(() => {
     return () => {
@@ -20,6 +21,10 @@ export function useCameraStream(videoRef) {
   }, [videoRef])
 
   async function startCamera() {
+    if (isStarting || status === 'requesting' || status === 'ready') {
+      return status === 'ready'
+    }
+
     if (!navigator.mediaDevices?.getUserMedia) {
       setStatus('error')
       setError('Este navegador no soporta getUserMedia().')
@@ -27,6 +32,7 @@ export function useCameraStream(videoRef) {
     }
 
     try {
+      setIsStarting(true)
       setStatus('requesting')
       setError('')
 
@@ -44,6 +50,7 @@ export function useCameraStream(videoRef) {
       video.muted = true
       video.playsInline = true
 
+      await waitForVideoReady(video)
       await video.play()
       setStatus('ready')
       return true
@@ -51,6 +58,8 @@ export function useCameraStream(videoRef) {
       setStatus('error')
       setError(err.message || 'No se pudo abrir la camara.')
       return false
+    } finally {
+      setIsStarting(false)
     }
   }
 
@@ -66,6 +75,7 @@ export function useCameraStream(videoRef) {
     startCamera,
     stopCamera: stopCurrentCamera,
     isActive: status === 'ready',
+    isStarting,
   }
 }
 
@@ -80,4 +90,36 @@ function stopCamera(videoElement) {
     videoElement.pause?.()
     videoElement.srcObject = null
   }
+}
+
+function waitForVideoReady(videoElement) {
+  return new Promise((resolve, reject) => {
+    if (!videoElement) {
+      reject(new Error('No se encontro el elemento de video.'))
+      return
+    }
+
+    if (videoElement.readyState >= 2) {
+      resolve()
+      return
+    }
+
+    const onLoadedMetadata = () => {
+      cleanup()
+      resolve()
+    }
+
+    const onError = () => {
+      cleanup()
+      reject(new Error('No se pudo preparar el video.'))
+    }
+
+    const cleanup = () => {
+      videoElement.removeEventListener('loadedmetadata', onLoadedMetadata)
+      videoElement.removeEventListener('error', onError)
+    }
+
+    videoElement.addEventListener('loadedmetadata', onLoadedMetadata, { once: true })
+    videoElement.addEventListener('error', onError, { once: true })
+  })
 }

@@ -1,6 +1,6 @@
-import { StrictMode } from 'react'
+import { StrictMode, useEffect } from 'react'
 import { createRoot } from 'react-dom/client'
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom'
 import './index.css'
 
 import { AuthProvider } from './context/AuthContext'
@@ -15,12 +15,20 @@ import Posture from './pages/Posture'
 import Notifications from './pages/Notifications'
 import Profile from './pages/Profile'
 
+const DEMO_USER = {
+  name: 'Demo',
+  email: 'demo@gympose.com',
+}
+
+
+
 createRoot(document.getElementById('root')).render(
   <StrictMode>
     <AuthProvider>
       <BrowserRouter>
         <Routes>
-          <Route path="/login"      element={<Login />} />
+          <Route path="/" element={<Navigate to="/login" replace />} />
+          <Route path="/login" element={<Login />} /> 
           <Route path="/register"   element={<Register />} />
           <Route path="/dashboard"  element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
           <Route path="/training"   element={<ProtectedRoute><Training /></ProtectedRoute>} />

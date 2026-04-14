@@ -17,6 +17,7 @@ export default function Training() {
     startCamera,
     stopCamera,
     isActive: isCameraActive,
+    isStarting,
   } = useCameraStream(videoRef)
 
   const {
@@ -55,6 +56,7 @@ export default function Training() {
         <TrainingSessionHeader
           isLive={isSessionLive}
           onToggleSession={handleToggleSession}
+          disabled={cameraStatus === 'requesting' || isStarting}
         />
 
         <PoseViewport
