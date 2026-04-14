@@ -1,9 +1,10 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, Float, DateTime, ForeignKey, Integer
+ffrom sqlalchemy import Column, String, Float, DateTime, ForeignKey, Integer, Boolean
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from database import Base
+from sqlalchemy import Boolean 
 
 class User(Base):
     __tablename__ = "users"
@@ -23,6 +24,8 @@ class User(Base):
     sessions = relationship("Session", back_populates="user")
     # Dejamos lista la relación para la tarea de Nutrición
     nutritions = relationship("Nutrition", back_populates="user")
+     # Notificaciones
+    notifications = relationship("Notification", back_populates="user")
 
 class Session(Base):
     __tablename__ = "sessions"
@@ -57,3 +60,14 @@ class Nutrition(Base):
     description = Column(String)
     
     user = relationship("User", back_populates="nutritions")
+
+    class Notification(Base):
+    __tablename__ = "notifications"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"))
+    type = Column(String)       # "logro", "consejo", "record"
+    message = Column(String)
+    read = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    user = relationship("User", back_populates="notifications")

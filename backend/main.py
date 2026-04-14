@@ -2,8 +2,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from database import engine, Base
 from models import User, Session, Repetition, Nutrition
-from routers import auth
+from routers import auth, notifications
 import init_db
+from models import User, Session, Repetition, Nutrition, Notification
+from routers import auth, notifications, users
 
 Base.metadata.create_all(bind=engine)
 
@@ -28,6 +30,8 @@ app.add_middleware(
 )
 
 app.include_router(auth.router)
+app.include_router(notifications.router)
+app.include_router(users.route)
 
 @app.get("/health")
 def health_check():
