@@ -1,11 +1,10 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { login } from '../services/authService'
 import { useAuth } from '../context/AuthContext'
 
 export default function Login() {
   const navigate = useNavigate()
-  const { signIn } = useAuth()
+  const { login } = useAuth()
   const [form, setForm]           = useState({ email: '', password: '' })
   const [errors, setErrors]       = useState({})
   const [serverError, setServerError] = useState('')
@@ -25,8 +24,7 @@ export default function Login() {
     if (Object.keys(errs).length) { setErrors(errs); return }
     setErrors({}); setServerError(''); setLoading(true)
     try {
-      const data = await login(form.email, form.password)
-      signIn(data.user)
+      await login(form.email, form.password)
       navigate('/dashboard')
     } catch (err) {
       setServerError(err.message)
