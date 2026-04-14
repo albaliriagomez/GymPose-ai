@@ -1,3 +1,3 @@
-from .models import User, Session, Repetition, Nutrition
+from .models import User, Session, Repetition, Nutrition, Notification
 
-__all__ = ["User", "Session", "Repetition", "Nutrition"]
+__all__ = ["User", "Session", "Repetition", "Nutrition","Notification"]
