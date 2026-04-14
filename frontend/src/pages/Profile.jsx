@@ -20,16 +20,19 @@ export default function Profile() {
   const token = localStorage.getItem('gympose_token')
 
   useEffect(() => {
-    getProfile(token).then(data => {
-      setUser(data)
-      setForm({
-        name:      data.name      || '',
-        weight_kg: data.weight_kg || '',
-        height_cm: data.height_cm || '',
-        goal:      data.goal      || '',
-      })
+  getProfile(token).then(data => {
+    console.log('DATA:', data)
+    setUser(data)
+    setForm({
+      name:      data.name      || '',
+      weight_kg: data.weight_kg || '',
+      height_cm: data.height_cm || '',
+      goal:      data.goal      || '',
     })
-  }, [])
+  }).catch(err => {
+    console.error('ERROR:', err.response?.data || err.message)
+  })
+}, [])
 
   const validate = () => {
     const e = {}

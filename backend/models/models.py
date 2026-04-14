@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-ffrom sqlalchemy import Column, String, Float, DateTime, ForeignKey, Integer, Boolean
+from sqlalchemy import Column, String, Float, DateTime, ForeignKey, Integer, Boolean
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from database import Base
@@ -48,7 +48,6 @@ class Repetition(Base):
     
     session = relationship("Session", back_populates="repetitions")
 
-# Nuevo Modelo para cumplir con la pestaña de Nutrición del Front
 class Nutrition(Base):
     __tablename__ = "nutrition_plans"
     id = Column(Integer, primary_key=True, index=True)
@@ -61,11 +60,12 @@ class Nutrition(Base):
     
     user = relationship("User", back_populates="nutritions")
 
-    class Notification(Base):
+class Notification(Base):
     __tablename__ = "notifications"
+    
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"))
-    type = Column(String)       # "logro", "consejo", "record"
+    type = Column(String)
     message = Column(String)
     read = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
