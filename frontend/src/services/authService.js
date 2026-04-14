@@ -44,7 +44,19 @@ export const login = async (email, password) => {
     localStorage.setItem('gympose_user', JSON.stringify(data.user))
     return data
   } catch (err) {
-    const errorMessage = err.response?.data?.detail || 'Email o contraseña incorrectos'
+    //manejo de diferentes tipos de errores
+    let errorMessage = 'Error al registrarse'
+    
+    if (err.response?.data?.detail) {
+      errorMessage = err.response.data.detail
+    } else if (err.response?.data?.errors) {
+      //validación de Pydantic - array de errores
+      errorMessage = err.response.data.errors.map(e => e.msg).join(', ')
+    } else if (Array.isArray(err.response?.data)) {
+      //otro formato de array de errores
+      errorMessage = err.response.data.map(e => e.msg || e.detail || String(e)).join(', ')
+    }
+    
     throw new Error(errorMessage)
   }
 }

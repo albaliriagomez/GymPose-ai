@@ -1,14 +1,14 @@
 from pydantic import BaseModel, EmailStr, Field
 from typing import Optional
-
+from uuid import UUID
 
 class RegisterRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=100, description="Nombre del usuario")
     email: EmailStr = Field(..., description="Correo electrónico único")
     password: str = Field(..., min_length=6, description="Contraseña (mínimo 6 caracteres)")
-    weight_kg: float = Field(..., gt=0, description="Peso en kilogramos")
-    height_cm: float = Field(..., gt=0, description="Altura en centímetros")
-    goal: str = Field(..., min_length=1, max_length=200, description="Objetivo de entrenamiento")
+    weight_kg: Optional[float] = Field(None, gt=0, description="Peso en kilogramos (opcional)")
+    height_cm: Optional[float] = Field(None, gt=0, description="Altura en centímetros (opcional)")
+    goal: Optional[str] = Field(None, min_length=1, max_length=200, description="Objetivo de entrenamiento (opcional)")
 
     class Config:
         json_schema_extra = {
@@ -54,18 +54,18 @@ class UpdateProfileRequest(BaseModel):
 
 
 class UserResponse(BaseModel):
-    id: int
+    id: UUID
     name: str
     email: str
-    weight_kg: float
-    height_cm: float
-    goal: str
+    weight_kg: Optional[float] = None
+    height_cm: Optional[float] = None
+    goal: Optional[str] = None
 
     class Config:
         from_attributes = True
         json_schema_extra = {
             "example": {
-                "id": 1,
+                "id": "7e490a24-7c5f-42ff-b4ba-ba714417081e",
                 "name": "Juan Pérez",
                 "email": "juan@example.com",
                 "weight_kg": 75.5,
