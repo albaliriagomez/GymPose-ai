@@ -12,6 +12,9 @@ import Training from './pages/Training'
 import { Nutrition, Settings } from './pages/Placeholders'
 import Posture from './pages/Posture'
 
+import Notifications from './pages/Notifications'
+import Profile from './pages/Profile'
+
 createRoot(document.getElementById('root')).render(
   <StrictMode>
     <AuthProvider>
@@ -25,6 +28,8 @@ createRoot(document.getElementById('root')).render(
           <Route path="/nutrition"  element={<ProtectedRoute><Nutrition /></ProtectedRoute>} />
           <Route path="/settings"   element={<ProtectedRoute><Settings /></ProtectedRoute>} />
           <Route path="*"           element={<Navigate to="/login" replace />} />
+          <Route path="/notifications" element={<ProtectedRoute><Notifications /></ProtectedRoute>} />
+          <Route path="/profile"       element={<ProtectedRoute><Profile /></ProtectedRoute>} />
         </Routes>
       </BrowserRouter>
     </AuthProvider>
