@@ -1,6 +1,7 @@
 export default function TrainingSessionHeader({
   isLive,
   onToggleSession,
+  disabled = false,
 }) {
   return (
     <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
@@ -18,11 +19,12 @@ export default function TrainingSessionHeader({
 
       <button
         onClick={onToggleSession}
+        disabled={disabled}
         className={`inline-flex items-center justify-center rounded-xl px-5 py-3 font-display text-sm font-bold tracking-wide transition-all ${
           isLive
             ? 'bg-red-600 text-white hover:bg-red-500'
             : 'bg-gym-cyan text-gym-bg hover:brightness-110'
-        }`}
+        } disabled:cursor-not-allowed disabled:opacity-60`}
       >
         {isLive ? 'Detener camara' : 'Iniciar camara'}
       </button>
