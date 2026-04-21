@@ -4,10 +4,12 @@ import { register } from '../services/authService'
 
 export default function Register() {
   const navigate = useNavigate()
-  const [form, setForm]           = useState({ name: '', email: '', password: '', confirm: '' })
-  const [errors, setErrors]       = useState({})
+  const [form, setForm] = useState({
+    name: '', email: '', password: '', confirm: '', weight_kg: '', height_cm: ''
+  })
+  const [errors, setErrors]           = useState({})
   const [serverError, setServerError] = useState('')
-  const [loading, setLoading]     = useState(false)
+  const [loading, setLoading]         = useState(false)
 
   const validate = () => {
     const e = {}
@@ -26,7 +28,13 @@ export default function Register() {
     if (Object.keys(errs).length) { setErrors(errs); return }
     setErrors({}); setServerError(''); setLoading(true)
     try {
-      await register({ name: form.name, email: form.email, password: form.password })
+      await register({
+        name: form.name,
+        email: form.email,
+        password: form.password,
+        weight_kg: form.weight_kg ? Number(form.weight_kg) : null,
+        height_cm: form.height_cm ? Number(form.height_cm) : null,
+      })
       navigate('/login')
     } catch (err) {
       setServerError(err.message)
@@ -76,10 +84,28 @@ export default function Register() {
           )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
-            {field('name',     'Nombre completo',    'text',     'Alex García')}
-            {field('email',    'Email',              'text',     'tu@email.com')}
-            {field('password', 'Contraseña',         'password', '••••••••')}
-            {field('confirm',  'Confirmar contraseña','password','••••••••')}
+            {field('name',     'Nombre completo',     'text',     'Tu nombre')}
+            {field('email',    'Email',               'text',     'tu@email.com')}
+            {field('password', 'Contraseña',          'password', '••••••••')}
+            {field('confirm',  'Confirmar contraseña','password', '••••••••')}
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-mono text-gym-muted mb-1.5">Peso (kg)</label>
+                <input type="number" value={form.weight_kg}
+                  onChange={e => setForm({ ...form, weight_kg: e.target.value })}
+                  placeholder="70" min="1"
+                  className="w-full bg-gym-accent border border-gym-border rounded-xl px-4 py-3 text-white text-sm placeholder-gym-muted outline-none focus:border-gym-cyan transition-colors" />
+              </div>
+              <div>
+                <label className="block text-xs font-mono text-gym-muted mb-1.5">Altura (cm)</label>
+                <input type="number" value={form.height_cm}
+                  onChange={e => setForm({ ...form, height_cm: e.target.value })}
+                  placeholder="175" min="1"
+                  className="w-full bg-gym-accent border border-gym-border rounded-xl px-4 py-3 text-white text-sm placeholder-gym-muted outline-none focus:border-gym-cyan transition-colors" />
+              </div>
+            </div>
+
             <button type="submit" disabled={loading}
               className="w-full py-3 rounded-xl font-display font-bold text-gym-bg tracking-wider transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50"
               style={{ background: 'linear-gradient(135deg,#00ff88,#00e5ff)', boxShadow: '0 0 25px rgba(0,255,136,0.3)' }}>

@@ -145,6 +145,7 @@ export default function Posture() {
   const [analysisData, setAnalysisData] = useState(null);
   const [errorMsg, setErrorMsg]         = useState(null);
   const fileInputRef = useRef(null);
+  const token = localStorage.getItem('gympose_token')
 
   const resetState = useCallback(() => {
     setPreview(null);
@@ -173,10 +174,10 @@ export default function Posture() {
       const formData = new FormData();
       formData.append('file', file);
 
-      const response = await fetch(`${API_URL}/posture/analyze`, {
-        method: 'POST',
-        body: formData,
-      });
+     const response = await fetch(`${API_URL}/posture/analyze?token=${token}`, {
+  method: 'POST',
+  body: formData,
+});
 
       if (!response.ok) {
         const err = await response.json().catch(() => ({}));

@@ -58,10 +58,7 @@ export default function Login() {
           <h1 className="font-display font-bold text-2xl text-white mb-1">Iniciar Sesión</h1>
           <p className="text-gym-muted text-sm mb-5">Bienvenido de nuevo a tu rendimiento</p>
 
-          {/* Demo hint */}
-          <div className="mb-5 p-3 rounded-lg bg-gym-cyan/10 border border-gym-cyan/20 text-gym-cyan text-xs font-mono">
-            🔑 Demo: alex@gympose.com / demo1234
-          </div>
+          
 
           {serverError && (
             <div className="mb-4 p-3 rounded-lg bg-red-900/30 border border-red-500/40 text-red-400 text-sm">
