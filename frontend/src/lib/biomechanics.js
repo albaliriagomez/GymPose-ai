@@ -31,12 +31,32 @@ function averageLandmark(left, right) {
   }
 }
 
+function averageAngles(values) {
+  const valid = values.filter((value) => Number.isFinite(value))
+  if (!valid.length) return null
+
+  return Number((valid.reduce((sum, value) => sum + value, 0) / valid.length).toFixed(1))
+}
+
+const BODY_REQUIRED_LANDMARKS = [
+  11, 12, // shoulders
+  23, 24, // hips
+  25, 26, // knees
+  27, 28, // ankles
+]
+
+function isLandmarkVisible(landmark, threshold = 0.6) {
+  return Boolean(landmark && (landmark.visibility ?? 1) >= threshold)
+}
+
 export function buildPoseInsights(poseLandmarkerResult) {
   const pose = poseLandmarkerResult?.landmarks?.[0]
 
   if (!pose) {
     return {
       hasPose: false,
+      hasFullBody: false,
+      bodyCoverage: 0,
       kneeAngle: null,
       torsoAngle: null,
       repCount: 0,
@@ -47,11 +67,32 @@ export function buildPoseInsights(poseLandmarkerResult) {
   const leftHip = pose[23]
   const leftKnee = pose[25]
   const leftAnkle = pose[27]
+  const rightHip = pose[24]
+  const rightKnee = pose[26]
+  const rightAnkle = pose[28]
   const shoulders = averageLandmark(pose[11], pose[12])
   const hips = averageLandmark(pose[23], pose[24])
+  const visibleLandmarks = BODY_REQUIRED_LANDMARKS.filter((index) => isLandmarkVisible(pose[index]))
+  const bodyCoverage = Number(((visibleLandmarks.length / BODY_REQUIRED_LANDMARKS.length) * 100).toFixed(0))
+  const hasFullBody = visibleLandmarks.length === BODY_REQUIRED_LANDMARKS.length
 
-  const kneeAngle = calculateJointAngle(leftHip, leftKnee, leftAnkle)
+  const kneeAngle = averageAngles([
+    calculateJointAngle(leftHip, leftKnee, leftAnkle),
+    calculateJointAngle(rightHip, rightKnee, rightAnkle),
+  ])
   const torsoAngle = calculateTorsoAngle(shoulders, hips)
+
+  if (!hasFullBody) {
+    return {
+      hasPose: true,
+      hasFullBody: false,
+      bodyCoverage,
+      kneeAngle,
+      torsoAngle,
+      repCount: 0,
+      feedback: `No veo tu cuerpo completo. Necesito hombros, cadera, rodillas y tobillos visibles (${bodyCoverage}%).`,
+    }
+  }
 
   let feedback = 'Pose detectada. Lista para feedback biomecanico.'
 
@@ -63,6 +104,8 @@ export function buildPoseInsights(poseLandmarkerResult) {
 
   return {
     hasPose: true,
+    hasFullBody: true,
+    bodyCoverage,
     kneeAngle,
     torsoAngle,
     repCount: 0,
