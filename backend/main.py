@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from database import engine, Base
 
 from models import User, Session, Repetition, Nutrition, Notification
-from routers import auth, posture, notifications, users, nutrition
+from routers import auth, posture, notifications, users, nutrition, dashboard
 
 import init_db
 
@@ -35,6 +35,7 @@ app.include_router(nutrition.router)
 app.include_router(posture.router)
 app.include_router(notifications.router)
 app.include_router(users.router)
+app.include_router(dashboard.router)
 
 @app.get("/health")
 def health_check():
