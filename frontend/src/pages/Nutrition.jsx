@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import CircularProgress from '../components/CircularProgress';
 import TipCard from '../components/TipCard';
 import WaterWidget from '../components/WaterWidget';
+import MealsSection from '../components/MealsSection';
 
 const Nutrition = () => {
   // Mock data - This will be replaced with API calls
@@ -52,6 +53,8 @@ const Nutrition = () => {
           />
         </div>
       </div>
+      {/*Meals Section*/}
+      <MealsSection />
     </div>
   );
 };

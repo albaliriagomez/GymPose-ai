@@ -12,11 +12,13 @@ from schemas.auth import (
     TokenResponse
 )
 from services.auth_service import AuthService
+from fastapi.security import OAuth2PasswordBearer
 
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-def get_current_user(token: str, db: Session = Depends(get_db)) -> User:
+def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
     user_id = AuthService.get_user_id_from_token(token)
     
     user = db.query(User).filter(User.id == user_id).first()
