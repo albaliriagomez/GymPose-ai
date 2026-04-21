@@ -1,8 +1,10 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from database import engine, Base
+
 from models import User, Session, Repetition, Nutrition, Notification
-from routers import auth, posture, notifications, users
+from routers import auth, posture, notifications, users, nutrition
+
 import init_db
 
 Base.metadata.create_all(bind=engine)
@@ -29,6 +31,7 @@ app.add_middleware(
 
 # Registro de rutas
 app.include_router(auth.router)
+app.include_router(nutrition.router)
 app.include_router(posture.router)
 app.include_router(notifications.router)
 app.include_router(users.router)
