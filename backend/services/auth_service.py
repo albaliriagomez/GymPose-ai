@@ -5,7 +5,7 @@ from passlib.context import CryptContext
 from fastapi import HTTPException, status
 import os
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 
 #obtener configuración desde .env
 SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-change-in-production")
