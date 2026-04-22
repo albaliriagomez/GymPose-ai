@@ -46,7 +46,7 @@ def register(request: RegisterRequest, db: Session = Depends(get_db)):
     new_user = User(
         name=request.name,
         email=request.email,
-        password=hashed_password,
+        password_hash=hashed_password,
         weight_kg=request.weight_kg,
         height_cm=request.height_cm,
         goal=request.goal
@@ -75,7 +75,7 @@ def login(request: LoginRequest, db: Session = Depends(get_db)):
             detail="Email o contraseña incorrectos"
         )
     
-    if not AuthService.verify_password(request.password, user.password):
+    if not AuthService.verify_password(request.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Email o contraseña incorrectos"

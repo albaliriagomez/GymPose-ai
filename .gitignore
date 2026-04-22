@@ -66,7 +66,9 @@ web_modules/
 .yarn-integrity
 
 # dotenv environment variable files
+backend/.venv/
 backend/venv/
+backend/venv31/
 backend/__pycache__/
 backend/.env
 .env
@@ -147,3 +149,4 @@ __pycache__/
 *.pyo
 *.pyd
 backend/.env
+venv31/ 
