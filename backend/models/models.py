@@ -11,7 +11,7 @@ class User(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String, nullable=False)
     email = Column(String, unique=True, index=True, nullable=False)
-    password = Column(String, nullable=False) # Guardaremos el hash
+    password_hash = Column(String, nullable=False) # Guardaremos el hash
     
     # Campos que pide el perfil pero pueden ser nulos al registrarse
     weight_kg = Column(Float, nullable=True)
