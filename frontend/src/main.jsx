@@ -11,6 +11,8 @@ import Dashboard from './pages/Dashboard'
 import Training from './pages/Training'
 import { Nutrition, Settings } from './pages/Placeholders'
 import Posture from './pages/Posture'
+import TrainingPlan from './pages/TrainingPlan'
+
 
 import Notifications from './pages/Notifications'
 import Profile from './pages/Profile'
@@ -34,6 +36,7 @@ createRoot(document.getElementById('root')).render(
           <Route path="/training"   element={<ProtectedRoute><Training /></ProtectedRoute>} />
           <Route path="/posture"    element={<ProtectedRoute><Posture /></ProtectedRoute>} />
           <Route path="/nutrition"  element={<ProtectedRoute><Nutrition /></ProtectedRoute>} />
+          <Route path="/plan" element={<TrainingPlan />} />
           <Route path="/settings"   element={<ProtectedRoute><Settings /></ProtectedRoute>} />
           <Route path="*"           element={<Navigate to="/login" replace />} />
           <Route path="/notifications" element={<ProtectedRoute><Notifications /></ProtectedRoute>} />
