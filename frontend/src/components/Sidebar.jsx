@@ -14,7 +14,7 @@ const Item = ({ to, label, icon }) => (
 )
 
 export default function Sidebar() {
-  const { signOut } = useAuth()
+  const { logout } = useAuth()
   const navigate    = useNavigate()
 
   return (
@@ -62,7 +62,7 @@ export default function Sidebar() {
             <circle cx="12" cy="12" r="3"/>
             <path d="M12 2v2M12 20v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M2 12h2M20 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
           </svg>} />
-        <button onClick={() => { signOut(); navigate('/login') }}
+        <button onClick={() => { logout(); navigate('/login') }}
           className="flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-mono text-gym-muted hover:text-red-400 hover:bg-red-900/10 transition-all">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4">
             <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>
