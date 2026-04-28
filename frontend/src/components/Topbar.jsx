@@ -8,6 +8,8 @@ const links = [
   { to: '/training',      label: 'Entrenamiento' },
   { to: '/posture',       label: 'Postura' },
   { to: '/nutrition',     label: 'Nutrición' },
+  { to: '/plan',          label: 'Plan' },
+
 ]
 
 export default function Topbar() {

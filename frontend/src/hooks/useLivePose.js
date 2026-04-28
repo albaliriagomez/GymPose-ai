@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { buildPoseInsights } from '../lib/biomechanics'
 import { createPoseLandmarker } from '../lib/pose'
 import { drawPoseLandmarks, resizeCanvasToVideo } from '../lib/poseDrawing'
+import { useRepCounter } from './useRepCounter'
+import { useSquatValidator } from './useSquatValidator'
 
 export function useLivePose({ videoRef, canvasRef, isRunning }) {
   const landmarkerRef = useRef(null)
@@ -13,10 +15,29 @@ export function useLivePose({ videoRef, canvasRef, isRunning }) {
   const [error, setError] = useState('')
   const [insights, setInsights] = useState({
     hasPose: false,
+    hasFullBody: false,
+    bodyCoverage: 0,
     kneeAngle: null,
     torsoAngle: null,
     repCount: 0,
     feedback: 'Inicializando detector de pose',
+  })
+
+  const squatValidation = useSquatValidator({
+    kneeAngle: insights.kneeAngle,
+    torsoAngle: insights.torsoAngle,
+    hasPose: insights.hasPose,
+    hasFullBody: insights.hasFullBody,
+    bodyCoverage: insights.bodyCoverage,
+    enabled: isRunning,
+  })
+
+  const repCounter = useRepCounter({
+    kneeAngle: insights.kneeAngle,
+    torsoAngle: insights.torsoAngle,
+    hasPose: insights.hasPose,
+    isValid: squatValidation.isValid,
+    enabled: isRunning,
   })
 
   useEffect(() => {
@@ -114,7 +135,14 @@ export function useLivePose({ videoRef, canvasRef, isRunning }) {
   return {
     status,
     error,
-    insights,
+    insights: {
+      ...insights,
+      repCount: repCounter.repCount,
+      validation: squatValidation,
+      feedback: squatValidation.feedback || insights.feedback,
+    },
+    repCount: repCounter.repCount,
+    squatValidation,
     isReady: status === 'ready' || status === 'tracking',
   }
 }
