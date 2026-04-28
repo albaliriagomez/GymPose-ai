@@ -17,6 +17,8 @@ class User(Base):
     weight_kg = Column(Float, nullable=True)
     height_cm = Column(Float, nullable=True)
     goal = Column(String, nullable=True) 
+    edad = Column(Integer, nullable=True)
+    sexo = Column(String, nullable=True)
     
     created_at = Column(DateTime, default=datetime.utcnow)
     

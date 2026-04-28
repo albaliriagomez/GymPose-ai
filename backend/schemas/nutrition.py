@@ -1,72 +1,50 @@
-from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import List, Optional
 from uuid import UUID
 
+from pydantic import BaseModel, Field
 
-class NutritionProfileCreate(BaseModel):
-    age: int = Field(..., gt=0, lt=120)
-    sex: str = Field(..., pattern="^(male|female)$")
-    activity_level: str = Field(..., pattern="^(sedentary|light|moderate|active|very_active)$")
+
+class MacrosPct(BaseModel):
+    proteina: int
+    carbos: int
+    grasas: int
+
 
 class NutritionProfileResponse(BaseModel):
-    objetivo_kcal: int
-    age: int
-    sex: str
-    activity_level: str
-    #campos de User que devolvemos para que el frontend los tenga juntos
-    weight_kg: Optional[float]
-    height_cm: Optional[float]
-    goal: Optional[str]
-
-    class Config:
-        from_attributes = True
-
-
-class Macros(BaseModel):
-    proteina: float
-    carbos: float
-    grasas: float
+    objetivo_kcal: Optional[int] = None
+    goal: Optional[str] = None
+    macros_pct: Optional[MacrosPct] = None
+    incomplete: bool
+    message: Optional[str] = None
 
 
 class MealCreate(BaseModel):
     name: str = Field(..., min_length=1)
     description: Optional[str] = None
-    time: Optional[str] = None          #"08:00 AM"
-    macros: Optional[Macros] = None
+    hora: Optional[str] = None
+    kcal: Optional[float] = None
+    proteina_g: Optional[float] = None
+    carbos_g: Optional[float] = None
+    grasas_g: Optional[float] = None
     ai_suggested: bool = False
 
-class MealStatusUpdate(BaseModel):
-    status: str = Field(..., pattern="^(completed|in_progress|pending)$")
 
-class MealResponse(BaseModel):
+class MealItem(BaseModel):
     id: UUID
     name: str
-    description: Optional[str]
-    time: Optional[str]
+    description: Optional[str] = None
+    time: Optional[str] = None
     status: str
-    macros: Macros
-    aiSuggested: bool   #camelCase para que coincida con lo que espera el frontend
-
-    class Config:
-        from_attributes = True
-
-    @classmethod
-    def from_orm_meal(cls, meal):
-        return cls(
-            id=meal.id,
-            name=meal.name,
-            description=meal.description,
-            time=meal.time,
-            status=meal.status,
-            macros=Macros(
-                proteina=meal.proteina_g or 0.0,
-                carbos=meal.carbos_g or 0.0,
-                grasas=meal.grasas_g or 0.0,
-            ),
-            aiSuggested=meal.ai_suggested,
-        )
+    macros: dict
+    kcal: float
+    aiSuggested: bool
 
 
 class MealsResponse(BaseModel):
-    lastUpdated: str       #"12:30 PM" — camelCase para el frontend
-    meals: List[MealResponse]
+    lastUpdated: Optional[str] = None
+    meals: List[MealItem]
+
+
+class TipResponse(BaseModel):
+    title: str
+    tip: str

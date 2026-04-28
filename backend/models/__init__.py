@@ -1,4 +1,4 @@
 from .models import User, Session, Repetition, Nutrition, Notification
-from .nutrition import NutritionProfile, Meal
+from .nutrition import Meal
 
-__all__ = ["User", "Session", "Repetition", "Nutrition", "NutritionProfile", "Meal", "Notification"]
+__all__ = ["User", "Session", "Repetition", "Nutrition", "Meal", "Notification"]

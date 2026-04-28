@@ -8,6 +8,8 @@ class UserOut(BaseModel):
     weight_kg: Optional[float] = None
     height_cm: Optional[float] = None
     goal: Optional[str] = None
+    edad: Optional[int] = None
+    sexo: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -17,6 +19,8 @@ class UserUpdate(BaseModel):
     height_cm: Optional[float] = None
     goal: Optional[str] = None
     name: Optional[str] = None
+    edad: Optional[int] = None
+    sexo: Optional[str] = None
 
     class Config:
         from_attributes = True

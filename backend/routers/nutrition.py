@@ -1,72 +1,23 @@
 from datetime import datetime
-from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from database import get_db
-from routers.auth import get_current_user   #mismo helper que usa auth.py
-from schemas.nutrition import (
-    NutritionProfileCreate,
-    NutritionProfileResponse,
-    MealCreate,
-    MealStatusUpdate,
-    MealResponse,
-    MealsResponse,
-)
+from routers.auth import get_current_user
+from schemas.nutrition import MealCreate, MealsResponse, NutritionProfileResponse, TipResponse
 from services import nutrition_service
 
 router = APIRouter(prefix="/nutrition", tags=["Nutrition"])
 
 
 @router.get("/profile", response_model=NutritionProfileResponse)
-def get_profile(
+def nutrition_profile(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    profile = nutrition_service.get_nutrition_profile(db, current_user.id)
-    if not profile:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Perfil nutricional no configurado. Completa tu perfil primero.",
-        )
-    return NutritionProfileResponse(
-        objetivo_kcal=profile.objetivo_kcal,
-        age=profile.age,
-        sex=profile.sex,
-        activity_level=profile.activity_level,
-        weight_kg=current_user.weight_kg,
-        height_cm=current_user.height_cm,
-        goal=current_user.goal,
-    )
-
-
-@router.post("/profile", response_model=NutritionProfileResponse, status_code=status.HTTP_201_CREATED)
-def save_profile(
-    body: NutritionProfileCreate,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
-):
-    result = nutrition_service.create_or_update_profile(
-        db,
-        user_id=current_user.id,
-        age=body.age,
-        sex=body.sex,
-        activity_level=body.activity_level,
-    )
-    if not result:
-        raise HTTPException(status_code=404, detail="Usuario no encontrado.")
-
-    profile, user = result
-    return NutritionProfileResponse(
-        objetivo_kcal=profile.objetivo_kcal,
-        age=profile.age,
-        sex=profile.sex,
-        activity_level=profile.activity_level,
-        weight_kg=user.weight_kg,
-        height_cm=user.height_cm,
-        goal=user.goal,
-    )
+    return nutrition_service.compute_nutrition_profile(current_user)
 
 
 @router.get("/meals", response_model=MealsResponse)
@@ -75,45 +26,83 @@ def get_meals(
     current_user=Depends(get_current_user),
 ):
     meals = nutrition_service.get_meals_today(db, current_user.id)
-    last_updated = datetime.now().strftime("%I:%M %p")  # "12:30 PM"
+    if not meals:
+        return {"lastUpdated": None, "meals": []}
+    return {
+        "lastUpdated": datetime.now().strftime("%I:%M %p"),
+        "meals": [nutrition_service.meal_to_item(m) for m in meals],
+    }
 
-    return MealsResponse(
-        lastUpdated=last_updated,
-        meals=[MealResponse.from_orm_meal(m) for m in meals],
-    )
 
-
-@router.post("/meals", response_model=MealResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/meals", status_code=status.HTTP_201_CREATED)
 def add_meal(
     body: MealCreate,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    meal = nutrition_service.create_meal(
-        db,
-        user_id=current_user.id,
-        name=body.name,
-        description=body.description,
-        time=body.time,
-        macros=body.macros,
-        ai_suggested=body.ai_suggested,
-    )
-    return MealResponse.from_orm_meal(meal)
+    meal = nutrition_service.create_meal(db, current_user.id, body.model_dump())
+    return nutrition_service.meal_to_item(meal)
 
 
-@router.patch("/meals/{meal_id}", response_model=MealResponse)
-def update_status(
-    meal_id: UUID,
-    body: MealStatusUpdate,
+@router.get("/tip", response_model=TipResponse)
+def get_tip(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    meal = nutrition_service.update_meal_status(
-        db, meal_id=meal_id, user_id=current_user.id, new_status=body.status
+    profile = nutrition_service.compute_nutrition_profile(current_user)
+    consumed = nutrition_service.total_kcal_today(db, current_user.id)
+    goal_key = profile.get("goal", nutrition_service.normalize_goal(current_user.goal))
+    objetivo = profile.get("objetivo_kcal") or 2200
+    return nutrition_service.generate_tip(
+        nutrition_service.goal_text(goal_key), consumed, int(objetivo)
     )
-    if not meal:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Comida no encontrada o no pertenece a este usuario.",
+
+
+@router.get("/suggest-meals")
+def suggest_meals(
+    force: bool = Query(False),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    profile = nutrition_service.compute_nutrition_profile(current_user)
+    if profile.get("incomplete"):
+        raise HTTPException(status_code=400, detail=profile["message"])
+
+    existing = nutrition_service.get_meals_today(db, current_user.id)
+    if existing and not force:
+        return JSONResponse(
+            status_code=409,
+            content={"error": "already_exists", "message": "Ya tienes comidas registradas hoy"},
         )
-    return MealResponse.from_orm_meal(meal)
+    if existing and force:
+        for meal in existing:
+            db.delete(meal)
+        db.commit()
+
+    try:
+        generated = nutrition_service.generate_meal_plan(
+            nutrition_service.goal_text(profile["goal"]),
+            profile["objetivo_kcal"],
+            profile["macros_pct"],
+        )
+    except Exception:
+        raise HTTPException(status_code=502, detail="No se pudo generar el plan de comidas")
+
+    for item in generated:
+        payload = {
+            "name": item.get("name", "Comida"),
+            "description": item.get("description"),
+            "hora": item.get("hora"),
+            "kcal": item.get("kcal"),
+            "proteina_g": item.get("proteina_g"),
+            "carbos_g": item.get("carbos_g"),
+            "grasas_g": item.get("grasas_g"),
+            "ai_suggested": True,
+        }
+        nutrition_service.create_meal(db, current_user.id, payload)
+
+    meals = nutrition_service.get_meals_today(db, current_user.id)
+    return {
+        "lastUpdated": datetime.now().strftime("%I:%M %p"),
+        "meals": [nutrition_service.meal_to_item(m) for m in meals],
+    }

@@ -39,6 +39,12 @@ def update_profile(
         current_user.height_cm = data.height_cm
     if data.goal is not None:
         current_user.goal = data.goal
+    if data.edad is not None:
+        current_user.edad = data.edad
+    if data.sexo is not None:
+        if data.sexo not in ("masculino", "femenino"):
+            raise HTTPException(status_code=400, detail="El sexo debe ser 'masculino' o 'femenino'")
+        current_user.sexo = data.sexo
 
     db.commit()
     db.refresh(current_user)
