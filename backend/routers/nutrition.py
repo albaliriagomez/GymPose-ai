@@ -2,7 +2,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session as DBSession
 
 from database import get_db
 from routers.auth import get_current_user
@@ -14,7 +14,7 @@ router = APIRouter(prefix="/nutrition", tags=["Nutrition"])
 
 @router.get("/profile", response_model=NutritionProfileResponse)
 def nutrition_profile(
-    db: Session = Depends(get_db),
+    db: DBSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     return nutrition_service.compute_nutrition_profile(current_user)
@@ -22,7 +22,7 @@ def nutrition_profile(
 
 @router.get("/meals", response_model=MealsResponse)
 def get_meals(
-    db: Session = Depends(get_db),
+    db: DBSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     meals = nutrition_service.get_meals_today(db, current_user.id)
@@ -37,7 +37,7 @@ def get_meals(
 @router.post("/meals", status_code=status.HTTP_201_CREATED)
 def add_meal(
     body: MealCreate,
-    db: Session = Depends(get_db),
+    db: DBSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     meal = nutrition_service.create_meal(db, current_user.id, body.model_dump())
@@ -46,7 +46,7 @@ def add_meal(
 
 @router.get("/tip", response_model=TipResponse)
 def get_tip(
-    db: Session = Depends(get_db),
+    db: DBSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     profile = nutrition_service.compute_nutrition_profile(current_user)
@@ -61,7 +61,7 @@ def get_tip(
 @router.get("/suggest-meals")
 def suggest_meals(
     force: bool = Query(False),
-    db: Session = Depends(get_db),
+    db: DBSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     profile = nutrition_service.compute_nutrition_profile(current_user)
