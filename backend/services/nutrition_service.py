@@ -172,32 +172,61 @@ def generate_tip(goal_value: str, consumed_kcal: int, objetivo_kcal: int) -> dic
 
 
 def generate_meal_plan(goal_value: str, objetivo_kcal: int, macros_pct: dict) -> list[dict]:
-    client = _groq_client()
-    if not client:
-        base = int(objetivo_kcal / 3)
-        return [
-            {"name": "Desayuno", "description": "Avena con yogur griego, fruta y nueces", "kcal": base, "proteina_g": 30, "carbos_g": 45, "grasas_g": 15, "hora": "08:00 AM"},
-            {"name": "Almuerzo", "description": "Pollo a la plancha con arroz integral y ensalada", "kcal": base, "proteina_g": 40, "carbos_g": 55, "grasas_g": 18, "hora": "01:00 PM"},
-            {"name": "Cena", "description": "Pescado al horno con quinoa y verduras", "kcal": objetivo_kcal - (base * 2), "proteina_g": 35, "carbos_g": 40, "grasas_g": 14, "hora": "08:00 PM"},
-        ]
-    prompt = (
-        "Eres un nutricionista deportivo. El usuario quiere "
-        f"{goal_value} y su objetivo calorico diario es {objetivo_kcal} kcal con "
-        f"distribucion de macros: {macros_pct['proteina']}% proteina, {macros_pct['carbos']}% carbohidratos, "
-        f"{macros_pct['grasas']}% grasas. Crea un plan de 3 comidas para hoy (desayuno, almuerzo, cena) en espanol. "
-        "Responde UNICAMENTE con JSON valido con esta estructura exacta: "
-        "{ 'meals': [ { 'name': 'Desayuno', 'description': 'descripcion concreta de los alimentos', "
-        "'kcal': 600, 'proteina_g': 40, 'carbos_g': 60, 'grasas_g': 20, 'hora': '08:00 AM' } ] } "
-        f"Las 3 comidas deben sumar aproximadamente {objetivo_kcal} kcal."
-    )
-    completion = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        temperature=0.5,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    raw = completion.choices[0].message.content or ""
-    parsed = _extract_json(raw)
-    meals = parsed.get("meals", [])
-    if not isinstance(meals, list) or len(meals) != 3:
-        raise ValueError("plan invalido")
-    return meals
+    fallback_meals = [
+        {
+            "name": "Desayuno",
+            "description": "Avena con frutas y proteína en polvo",
+            "kcal": 450,
+            "proteina_g": 35,
+            "carbos_g": 55,
+            "grasas_g": 10,
+            "hora": "08:00 AM",
+        },
+        {
+            "name": "Almuerzo",
+            "description": "Pechuga de pollo con arroz integral y verduras",
+            "kcal": 600,
+            "proteina_g": 45,
+            "carbos_g": 65,
+            "grasas_g": 15,
+            "hora": "01:00 PM",
+        },
+        {
+            "name": "Cena",
+            "description": "Salmón al horno con ensalada y papa dulce",
+            "kcal": 500,
+            "proteina_g": 40,
+            "carbos_g": 40,
+            "grasas_g": 20,
+            "hora": "07:00 PM",
+        },
+    ]
+
+    try:
+        client = _groq_client()
+        if not client:
+            return fallback_meals
+
+        prompt = (
+            "Eres un nutricionista deportivo. El usuario quiere "
+            f"{goal_value} y su objetivo calorico diario es {objetivo_kcal} kcal con "
+            f"distribucion de macros: {macros_pct['proteina']}% proteina, {macros_pct['carbos']}% carbohidratos, "
+            f"{macros_pct['grasas']}% grasas. Crea un plan de 3 comidas para hoy (desayuno, almuerzo, cena) en espanol. "
+            "Responde UNICAMENTE con JSON valido con esta estructura exacta: "
+            "{ 'meals': [ { 'name': 'Desayuno', 'description': 'descripcion concreta de los alimentos', "
+            "'kcal': 600, 'proteina_g': 40, 'carbos_g': 60, 'grasas_g': 20, 'hora': '08:00 AM' } ] } "
+            f"Las 3 comidas deben sumar aproximadamente {objetivo_kcal} kcal."
+        )
+        completion = client.with_options(timeout=15.0).chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            temperature=0.5,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = completion.choices[0].message.content or ""
+        parsed = _extract_json(raw)
+        meals = parsed.get("meals", [])
+        if not isinstance(meals, list) or len(meals) != 3:
+            return fallback_meals
+        return meals
+    except Exception:
+        return fallback_meals
