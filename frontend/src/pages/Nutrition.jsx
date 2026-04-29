@@ -2,14 +2,13 @@ import React from "react";
 import { Link } from "react-router-dom";
 import CircularProgress from "../components/CircularProgress";
 import TipCard from "../components/TipCard";
-import WaterWidget from "../components/WaterWidget";
 import MealsSection from "../components/MealsSection";
 import { useNutrition } from "../hooks/useNutrition";
 
 const Nutrition = () => {
   const nutrition = useNutrition();
   const { meals, profile, profileLoading, tip, tipLoading } = nutrition;
-  const consumed = Math.round(meals.reduce((acc, m) => acc + (m.kcal || 0), 0));
+  const consumed = Math.round(meals.filter((m) => m.status === "completed").reduce((acc, m) => acc + (m.kcal || 0), 0));
 
   return (
     <div className="w-full">
@@ -43,7 +42,7 @@ const Nutrition = () => {
               <div className="h-4 w-4/5 bg-gym-border rounded" />
             </div>
           ) : (
-            <TipCard title={tip.title} content={tip.tip} waterWidget={<WaterWidget current={1.8} target={3.5} />} />
+            <TipCard title={tip.title} content={tip.tip} />
           )}
         </div>
       </div>
@@ -55,6 +54,7 @@ const Nutrition = () => {
         refetch={nutrition.refetch}
         registerMeal={nutrition.registerMeal}
         suggestMeals={nutrition.suggestMeals}
+        updateMealStatus={nutrition.updateMealStatus}
         actionLoading={nutrition.actionLoading}
       />
     </div>

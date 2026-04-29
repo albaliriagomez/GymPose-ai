@@ -69,6 +69,8 @@ def parse_time_12h(hora: str | None):
 def format_time_12h(value):
     if value is None:
         return None
+    if isinstance(value, str):
+        return value
     return value.strftime("%I:%M %p")
 
 
@@ -114,6 +116,20 @@ def create_meal(db: Session, user_id, payload):
         ai_suggested=payload.get("ai_suggested", False),
     )
     db.add(meal)
+    db.commit()
+    db.refresh(meal)
+    return meal
+
+
+def update_meal_status(db: Session, user_id, meal_id, new_status: str):
+    meal = (
+        db.query(Meal)
+        .filter(Meal.id == meal_id, Meal.user_id == user_id)
+        .first()
+    )
+    if not meal:
+        return None
+    meal.status = new_status
     db.commit()
     db.refresh(meal)
     return meal

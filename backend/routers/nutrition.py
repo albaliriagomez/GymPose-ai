@@ -1,4 +1,5 @@
 from datetime import datetime
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
@@ -6,7 +7,7 @@ from sqlalchemy.orm import Session as DBSession
 
 from database import get_db
 from routers.auth import get_current_user
-from schemas.nutrition import MealCreate, MealsResponse, NutritionProfileResponse, TipResponse
+from schemas.nutrition import MealCreate, MealStatusUpdate, MealsResponse, NutritionProfileResponse, TipResponse
 from services import nutrition_service
 
 router = APIRouter(prefix="/nutrition", tags=["Nutrition"])
@@ -41,6 +42,19 @@ def add_meal(
     current_user=Depends(get_current_user),
 ):
     meal = nutrition_service.create_meal(db, current_user.id, body.model_dump())
+    return nutrition_service.meal_to_item(meal)
+
+
+@router.patch("/meals/{meal_id}")
+def patch_meal_status(
+    meal_id: UUID,
+    body: MealStatusUpdate,
+    db: DBSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    meal = nutrition_service.update_meal_status(db, current_user.id, meal_id, body.status)
+    if not meal:
+        raise HTTPException(status_code=404, detail="Comida no encontrada")
     return nutrition_service.meal_to_item(meal)
 
 

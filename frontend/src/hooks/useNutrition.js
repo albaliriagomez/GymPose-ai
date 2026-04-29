@@ -87,6 +87,14 @@ export const useNutrition = () => {
     [fetchMeals]
   );
 
+  const updateMealStatus = useCallback(
+    async (id, status) => {
+      await api.patch(`/nutrition/meals/${id}`, { status });
+      await fetchMeals();
+    },
+    [fetchMeals]
+  );
+
   useEffect(() => {
     fetchMeals();
     fetchProfile();
@@ -105,6 +113,7 @@ export const useNutrition = () => {
     tipLoading,
     registerMeal,
     suggestMeals,
+    updateMealStatus,
     actionLoading,
   };
 };

@@ -8,30 +8,30 @@ const now12h = () => {
   return d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: true });
 };
 
-const MealsSection = ({
-    meals,
-    lastUpdated,
-    loading,
-    error,
-    refetch,
-    registerMeal,
-    suggestMeals,
-    actionLoading,
-  }) => {
+const MealsSection = ({ meals, lastUpdated, loading, error, refetch, registerMeal, suggestMeals, updateMealStatus, actionLoading }) => {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ description: "", hora: now12h(), name: "Desayuno" });
+  const [optimisticStatus, setOptimisticStatus] = useState({});
+  const [togglingId, setTogglingId] = useState(null);
 
-  const totals = useMemo(() => {
-    return meals.reduce(
-      (acc, m) => ({
-        proteina: acc.proteina + (m.macros?.proteina ?? 0),
-        carbos: acc.carbos + (m.macros?.carbos ?? 0),
-        grasas: acc.grasas + (m.macros?.grasas ?? 0),
-        kcal: acc.kcal + (m.kcal ?? 0),
-      }),
-      { proteina: 0, carbos: 0, grasas: 0, kcal: 0 }
-    );
-  }, [meals]);
+  const mealsWithStatus = useMemo(
+    () => meals.map((m) => ({ ...m, status: optimisticStatus[m.id] ?? m.status })),
+    [meals, optimisticStatus]
+  );
+
+  const totals = useMemo(
+    () =>
+      mealsWithStatus.reduce(
+        (acc, m) => ({
+          proteina: acc.proteina + (m.macros?.proteina ?? 0),
+          carbos: acc.carbos + (m.macros?.carbos ?? 0),
+          grasas: acc.grasas + (m.macros?.grasas ?? 0),
+          kcal: acc.kcal + (m.kcal ?? 0),
+        }),
+        { proteina: 0, carbos: 0, grasas: 0, kcal: 0 }
+      ),
+    [mealsWithStatus]
+  );
 
   const onRegister = async () => {
     if (!form.description.trim()) return;
@@ -48,6 +48,24 @@ const MealsSection = ({
     }
   };
 
+  const onToggleStatus = async (id, status) => {
+    const previous = mealsWithStatus.find((m) => m.id === id)?.status ?? "pending";
+    setOptimisticStatus((state) => ({ ...state, [id]: status }));
+    setTogglingId(id);
+    try {
+      await updateMealStatus(id, status);
+      setOptimisticStatus((state) => {
+        const next = { ...state };
+        delete next[id];
+        return next;
+      });
+    } catch {
+      setOptimisticStatus((state) => ({ ...state, [id]: previous }));
+    } finally {
+      setTogglingId(null);
+    }
+  };
+
   return (
     <div className="mt-8 animate-fadeInUp animation-delay-300">
       <div className="flex items-center justify-between mb-4">
@@ -55,16 +73,14 @@ const MealsSection = ({
         <div className="flex items-center gap-2">
           {lastUpdated && <span className="text-[10px] text-gym-muted uppercase tracking-wider">Ultima actualizacion: {lastUpdated}</span>}
           <button className="text-xs font-semibold text-gym-yellow border border-gym-yellow/30 px-3 py-1.5 rounded-lg bg-gym-yellow/5 hover:bg-gym-yellow/10 transition-all duration-200 disabled:opacity-50" disabled={actionLoading} onClick={onSuggest}>✨ Generar plan con IA</button>
-          <button className="flex items-center gap-1.5 text-xs font-semibold text-gym-cyan border border-gym-cyan/30 px-3 py-1.5 rounded-lg bg-gym-cyan/5 hover:bg-gym-cyan/10 transition-all duration-200" onClick={() => setOpen(true)}>
-            Registrar comida
-          </button>
+          <button className="flex items-center gap-1.5 text-xs font-semibold text-gym-cyan border border-gym-cyan/30 px-3 py-1.5 rounded-lg bg-gym-cyan/5 hover:bg-gym-cyan/10 transition-all duration-200" onClick={() => setOpen(true)}>Registrar comida</button>
         </div>
       </div>
 
       {loading && <div className="flex flex-col gap-3">{[1, 2, 3].map((i) => <div key={i} className="h-20 rounded-lg bg-gym-card border border-gym-border animate-pulse" />)}</div>}
       {!loading && error && <div className="flex flex-col items-center gap-3 py-8 text-center"><span className="text-gym-muted text-sm">{error}</span><button onClick={refetch} className="text-xs font-semibold text-gym-cyan border border-gym-cyan/30 px-3 py-1.5 rounded-lg bg-gym-cyan/5 hover:bg-gym-cyan/10 transition-all duration-200">Reintentar</button></div>}
-      {!loading && !error && meals.length === 0 && <div className="py-8 text-center"><span className="text-gym-muted text-sm">No hay comidas registradas hoy.</span></div>}
-      {!loading && !error && meals.length > 0 && <div className="flex flex-col gap-3">{meals.map((meal, i) => <div key={meal.id} className="animate-fadeInUp" style={{ animationDelay: `${0.1 + i * 0.08}s` }}><MealCard {...meal} emoji={MEAL_EMOJIS[meal.name] ?? "🍽️"} /></div>)}</div>}
+      {!loading && !error && mealsWithStatus.length === 0 && <div className="py-8 text-center"><span className="text-gym-muted text-sm">No hay comidas registradas hoy.</span></div>}
+      {!loading && !error && mealsWithStatus.length > 0 && <div className="flex flex-col gap-3">{mealsWithStatus.map((meal, i) => <div key={meal.id} className="animate-fadeInUp" style={{ animationDelay: `${0.1 + i * 0.08}s` }}><MealCard {...meal} emoji={MEAL_EMOJIS[meal.name] ?? "🍽️"} onToggleStatus={onToggleStatus} toggling={togglingId === meal.id} /></div>)}</div>}
 
       {!loading && !error && (
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3 px-4 py-3 rounded-lg bg-gym-card border border-gym-border">
@@ -99,9 +115,7 @@ const MealsSection = ({
             </div>
             <div className="flex justify-end gap-2">
               <button onClick={() => setOpen(false)} className="text-xs font-mono text-gym-muted border border-gym-border bg-gym-accent px-3 py-1.5 rounded-lg">Cancelar</button>
-              <button onClick={onRegister} disabled={actionLoading} className="text-xs font-mono text-gym-bg font-bold px-3 py-1.5 rounded-lg disabled:opacity-50" style={{ background: "linear-gradient(135deg,#00e5ff,#00b8d4)" }}>
-                {actionLoading ? "Registrando..." : "Registrar"}
-              </button>
+              <button onClick={onRegister} disabled={actionLoading} className="text-xs font-mono text-gym-bg font-bold px-3 py-1.5 rounded-lg disabled:opacity-50" style={{ background: "linear-gradient(135deg,#00e5ff,#00b8d4)" }}>{actionLoading ? "Registrando..." : "Registrar"}</button>
             </div>
           </div>
         </div>

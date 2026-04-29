@@ -29,6 +29,10 @@ class MealCreate(BaseModel):
     ai_suggested: bool = False
 
 
+class MealStatusUpdate(BaseModel):
+    status: str = Field(..., pattern="^(completed|pending)$")
+
+
 class MealItem(BaseModel):
     id: UUID
     name: str
