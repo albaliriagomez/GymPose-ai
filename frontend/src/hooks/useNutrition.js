@@ -95,6 +95,41 @@ export const useNutrition = () => {
     [fetchMeals]
   );
 
+  const updateMealDetails = useCallback(
+    async (id, payload) => {
+      await api.patch(`/nutrition/meals/${id}`, payload);
+      await fetchMeals();
+    },
+    [fetchMeals]
+  );
+
+  const deleteMeal = useCallback(
+    async (id) => {
+      await api.delete(`/nutrition/meals/${id}`);
+      await fetchMeals();
+    },
+    [fetchMeals]
+  );
+
+  const regenerateMeal = useCallback(
+    async (meal_id, ingredientes = "") => {
+      const { data } = await api.post("/nutrition/meals/regenerate", { meal_id, ingredientes });
+      await fetchMeals();
+      return data;
+    },
+    [fetchMeals]
+  );
+
+  const getMealRecipe = useCallback(async (id) => {
+    const { data } = await api.get(`/nutrition/meals/${id}/recipe`);
+    return data;
+  }, []);
+
+  const getDailySummary = useCallback(async () => {
+    const { data } = await api.get("/nutrition/daily-summary");
+    return data;
+  }, []);
+
   useEffect(() => {
     fetchMeals();
     fetchProfile();
@@ -114,6 +149,11 @@ export const useNutrition = () => {
     registerMeal,
     suggestMeals,
     updateMealStatus,
+    updateMealDetails,
+    deleteMeal,
+    regenerateMeal,
+    getMealRecipe,
+    getDailySummary,
     actionLoading,
   };
 };

@@ -5,21 +5,26 @@ const MealCard = ({
   name,
   description,
   time,
+  kcal = 0,
   status = "pending",
   macros = { proteina: 30, carbos: 50, grasas: 15 },
   emoji = "🍽️",
   aiSuggested = false,
   onToggleStatus,
   toggling = false,
+  onOpenDetail,
+  onRegenerate,
+  regenerating = false,
 }) => {
   const isCompleted = status === "completed";
   const isInProgress = status === "in_progress";
 
   return (
     <div
+      onClick={() => onOpenDetail?.()}
       className={`
         relative flex items-center gap-4 rounded-lg p-4 border
-        transition-all duration-300 group
+        transition-all duration-300 group cursor-pointer
         ${isInProgress ? "bg-gym-card border-gym-yellow/30 shadow-md shadow-gym-yellow/10" : "bg-gym-card border-gym-border hover:border-gym-cyan/40 hover:shadow-md hover:shadow-gym-cyan/10"}
       `}
     >
@@ -37,6 +42,7 @@ const MealCard = ({
           <MacroTag dot="bg-gym-cyan" label="Proteina" value={macros.proteina} />
           <MacroTag dot="bg-gym-yellow" label="Carbos" value={macros.carbos} />
           <MacroTag dot="bg-red-400" label="Grasas" value={macros.grasas} />
+          <MacroTag dot="bg-slate-300" label="KCAL" value={Math.round(Number.isFinite(kcal) ? kcal : 0)} unit="" textColor="text-slate-200" />
         </div>
       </div>
 
@@ -44,21 +50,36 @@ const MealCard = ({
         <span className="text-[11px] text-gym-muted tabular-nums">{time}</span>
         <button
           type="button"
-          onClick={() => onToggleStatus?.(id, isCompleted ? "pending" : "completed")}
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleStatus?.(id, isCompleted ? "pending" : "completed");
+          }}
           disabled={toggling}
           className="transition-all duration-200 disabled:opacity-60"
         >
           {isCompleted ? <CheckIcon /> : <CircleIcon />}
+        </button>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onRegenerate?.();
+          }}
+          disabled={regenerating}
+          className="opacity-0 group-hover:opacity-100 text-[10px] text-gym-cyan border border-gym-cyan/30 px-2 py-0.5 rounded-md transition-all duration-200 disabled:opacity-50"
+          title="Regenerar"
+        >
+          🔄 Regenerar
         </button>
       </div>
     </div>
   );
 };
 
-const MacroTag = ({ dot, label, value }) => (
-  <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-gym-muted px-2 py-0.5 rounded-full border border-gym-border bg-gym-border/30">
+const MacroTag = ({ dot, label, value, unit = "g", textColor = "text-gym-muted" }) => (
+  <span className={`inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide ${textColor} px-2 py-0.5 rounded-full border border-gym-border bg-gym-border/30`}>
     <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${dot}`} />
-    {label}: {value}g
+    {label}: {value}{unit}
   </span>
 );
 
