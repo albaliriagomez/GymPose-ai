@@ -10,6 +10,9 @@ class UserOut(BaseModel):
     goal: Optional[str] = None
     edad: Optional[int] = None
     sexo: Optional[str] = None
+    nivel_actividad: Optional[str] = None
+    preferencia_alimentaria: Optional[str] = None
+    alergias: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -21,6 +24,9 @@ class UserUpdate(BaseModel):
     name: Optional[str] = None
     edad: Optional[int] = None
     sexo: Optional[str] = None
+    nivel_actividad: Optional[str] = None
+    preferencia_alimentaria: Optional[str] = None
+    alergias: Optional[str] = None
 
     class Config:
         from_attributes = True

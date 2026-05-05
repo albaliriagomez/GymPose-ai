@@ -45,6 +45,12 @@ def update_profile(
         if data.sexo not in ("masculino", "femenino"):
             raise HTTPException(status_code=400, detail="El sexo debe ser 'masculino' o 'femenino'")
         current_user.sexo = data.sexo
+    if data.nivel_actividad is not None:
+        current_user.nivel_actividad = data.nivel_actividad
+    if data.preferencia_alimentaria is not None:
+        current_user.preferencia_alimentaria = data.preferencia_alimentaria
+    if data.alergias is not None:
+        current_user.alergias = data.alergias
 
     db.commit()
     db.refresh(current_user)

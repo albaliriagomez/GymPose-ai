@@ -5,8 +5,8 @@ import { getProfile, updateProfile } from "../services/userService";
 
 const goalOptions = [
   { value: "Perder grasa corporal", color: "text-gym-yellow", desc: "Reducir % de grasa y definir" },
-  { value: "Aumentar masa muscular", color: "text-gym-cyan", desc: "Hipertrofia y ganancia de fuerza" },
-  { value: "Mantenimiento corporal", color: "text-gym-green", desc: "Recomposicion y equilibrio" },
+  { value: "Mantener peso", color: "text-gym-green", desc: "Mantener composicion corporal" },
+  { value: "Ganar músculo", color: "text-gym-cyan", desc: "Hipertrofia y ganancia de fuerza" },
 ];
 
 export default function Profile() {
@@ -29,6 +29,9 @@ export default function Profile() {
           goal: data.goal || "",
           edad: data.edad || "",
           sexo: data.sexo || "",
+          nivel_actividad: data.nivel_actividad || "",
+          preferencia_alimentaria: data.preferencia_alimentaria || "",
+          alergias: data.alergias || "",
         });
       })
       .catch((err) => console.error("ERROR:", err.response?.data || err.message));
@@ -60,6 +63,9 @@ export default function Profile() {
         goal: form.goal || null,
         edad: form.edad ? Number(form.edad) : null,
         sexo: form.sexo || null,
+        nivel_actividad: form.nivel_actividad || null,
+        preferencia_alimentaria: form.preferencia_alimentaria || null,
+        alergias: form.alergias || null,
       });
       setUser(updated);
       setEditing(false);
@@ -165,7 +171,41 @@ export default function Profile() {
 
             <div>
               <label className="block text-xs font-mono text-gym-muted mb-2">Meta de Entrenamiento</label>
-              <input type="text" value={form.goal} onChange={(e) => setForm({ ...form, goal: e.target.value })} disabled={!editing} placeholder="Perder grasa corporal / Aumentar masa muscular / Mantenimiento corporal" className="w-full bg-gym-accent border border-gym-border rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-gym-cyan transition-colors disabled:opacity-50" />
+              <select value={form.goal} onChange={(e) => setForm({ ...form, goal: e.target.value })} disabled={!editing} className="w-full bg-gym-accent border border-gym-border rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-gym-cyan transition-colors disabled:opacity-50">
+                <option value="">Seleccionar</option>
+                <option value="Perder grasa corporal">Perder grasa corporal</option>
+                <option value="Mantener peso">Mantener peso</option>
+                <option value="Ganar músculo">Ganar músculo</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-mono text-gym-muted mb-1.5">Nivel de actividad física</label>
+              <select value={form.nivel_actividad} onChange={(e) => setForm({ ...form, nivel_actividad: e.target.value })} disabled={!editing} className="w-full bg-gym-accent border border-gym-border rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-gym-cyan transition-colors disabled:opacity-50">
+                <option value="">Seleccionar</option>
+                <option value="sedentario">Sedentario (poco o ningún ejercicio)</option>
+                <option value="ligero">Ligero (ejercicio 1-3 días/semana)</option>
+                <option value="moderado">Moderado (ejercicio 3-5 días/semana)</option>
+                <option value="activo">Activo (ejercicio 6-7 días/semana)</option>
+                <option value="muy_activo">Muy activo (entrenamientos intensos diarios)</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-mono text-gym-muted mb-1.5">Preferencia alimentaria</label>
+              <select value={form.preferencia_alimentaria} onChange={(e) => setForm({ ...form, preferencia_alimentaria: e.target.value })} disabled={!editing} className="w-full bg-gym-accent border border-gym-border rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-gym-cyan transition-colors disabled:opacity-50">
+                <option value="">Seleccionar</option>
+                <option value="sin_restriccion">Sin restricciones</option>
+                <option value="vegetariano">Vegetariano</option>
+                <option value="vegano">Vegano</option>
+                <option value="sin_gluten">Sin gluten</option>
+                <option value="sin_lactosa">Sin lactosa</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-mono text-gym-muted mb-1.5">Alergias o intolerancias</label>
+              <input type="text" value={form.alergias} onChange={(e) => setForm({ ...form, alergias: e.target.value })} disabled={!editing} placeholder="Ej: nueces, mariscos, huevo..." className="w-full bg-gym-accent border border-gym-border rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-gym-cyan transition-colors disabled:opacity-50" />
             </div>
           </div>
         </div>

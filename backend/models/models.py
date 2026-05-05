@@ -19,6 +19,9 @@ class User(Base):
     goal = Column(String, nullable=True) 
     edad = Column(Integer, nullable=True)
     sexo = Column(String, nullable=True)
+    nivel_actividad = Column(String, nullable=True)
+    preferencia_alimentaria = Column(String, nullable=True)
+    alergias = Column(String, nullable=True)
     
     created_at = Column(DateTime, default=datetime.utcnow)
     

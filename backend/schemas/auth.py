@@ -43,6 +43,9 @@ class UpdateProfileRequest(BaseModel):
     goal: Optional[str] = Field(None, min_length=1, max_length=200)
     edad: Optional[int] = Field(None, gt=0, lt=120)
     sexo: Optional[str] = Field(None, pattern="^(masculino|femenino)$")
+    nivel_actividad: Optional[str] = None
+    preferencia_alimentaria: Optional[str] = None
+    alergias: Optional[str] = None
 
     class Config:
         json_schema_extra = {
@@ -64,6 +67,9 @@ class UserResponse(BaseModel):
     goal: Optional[str] = None
     edad: Optional[int] = None
     sexo: Optional[str] = None
+    nivel_actividad: Optional[str] = None
+    preferencia_alimentaria: Optional[str] = None
+    alergias: Optional[str] = None
 
     class Config:
         from_attributes = True
