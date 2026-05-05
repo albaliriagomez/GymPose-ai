@@ -55,6 +55,11 @@ const Nutrition = () => {
         registerMeal={nutrition.registerMeal}
         suggestMeals={nutrition.suggestMeals}
         updateMealStatus={nutrition.updateMealStatus}
+        updateMealDetails={nutrition.updateMealDetails}
+        deleteMeal={nutrition.deleteMeal}
+        regenerateMeal={nutrition.regenerateMeal}
+        getMealRecipe={nutrition.getMealRecipe}
+        getDailySummary={nutrition.getDailySummary}
         actionLoading={nutrition.actionLoading}
       />
     </div>

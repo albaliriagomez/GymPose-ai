@@ -164,6 +164,45 @@ def update_meal_status(db: Session, user_id, meal_id, new_status: str):
     return meal
 
 
+def get_meal_by_id(db: Session, user_id, meal_id):
+    return (
+        db.query(Meal)
+        .filter(Meal.id == meal_id, Meal.user_id == user_id)
+        .first()
+    )
+
+
+def update_meal_fields(
+    db: Session,
+    user_id,
+    meal_id,
+    status: str | None = None,
+    description: str | None = None,
+    hora: str | None = None,
+):
+    meal = get_meal_by_id(db, user_id, meal_id)
+    if not meal:
+        return None
+    if status is not None:
+        meal.status = status
+    if description is not None:
+        meal.descripcion = description
+    if hora is not None:
+        meal.hora = parse_time_12h(hora) if hora else None
+    db.commit()
+    db.refresh(meal)
+    return meal
+
+
+def delete_meal(db: Session, user_id, meal_id) -> bool:
+    meal = get_meal_by_id(db, user_id, meal_id)
+    if not meal:
+        return False
+    db.delete(meal)
+    db.commit()
+    return True
+
+
 def total_kcal_today(db: Session, user_id) -> int:
     value = (
         db.query(func.coalesce(func.sum(Meal.kcal), 0))
@@ -339,3 +378,115 @@ def generate_meal_plan(
         return meals
     except Exception:
         return fallback_meals
+
+
+def regenerate_single_meal(
+    original_description: str,
+    goal_value: str,
+    kcal_estimadas: int,
+    preferencia_alimentaria: str | None,
+    alergias: str | None,
+    ingredientes: str | None,
+) -> dict:
+    client = _groq_client()
+    if not client:
+        raise RuntimeError("GROQ_API_KEY no configurada")
+    preferencia = (preferencia_alimentaria or "").strip() or "sin restricciones"
+    alergias_text = (alergias or "").strip() or "ninguna"
+    extra_ingredientes = ""
+    if (ingredientes or "").strip():
+        extra_ingredientes = f"El usuario solo tiene disponible: {(ingredientes or '').strip()}. "
+    prompt = (
+        "Eres un nutricionista deportivo. Sustituye esta comida: "
+        f"'{original_description}' que forma parte de un plan para "
+        f"{goal_value} con objetivo de {kcal_estimadas} kcal para esta comida. "
+        f"{extra_ingredientes}"
+        f"Preferencia alimentaria: {preferencia}. Alergias: {alergias_text}. "
+        "Genera UNA comida alternativa concreta con cantidades específicas. "
+        "Responde ÚNICAMENTE con JSON: "
+        "{ 'description': '...', 'kcal': 400, 'proteina_g': 30, 'carbos_g': 45, 'grasas_g': 12 }"
+    )
+    completion = client.with_options(timeout=15.0).chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        temperature=0.5,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    raw = completion.choices[0].message.content or ""
+    data = _extract_json(raw)
+    return {
+        "description": str(data.get("description", "")).strip(),
+        "kcal": float(data.get("kcal", 0) or 0),
+        "proteina_g": float(data.get("proteina_g", 0) or 0),
+        "carbos_g": float(data.get("carbos_g", 0) or 0),
+        "grasas_g": float(data.get("grasas_g", 0) or 0),
+    }
+
+
+def get_recipe_for_meal(description: str) -> dict:
+    client = _groq_client()
+    if not client:
+        raise RuntimeError("GROQ_API_KEY no configurada")
+    prompt = (
+        "Eres un chef nutricionista. Da la receta completa y preparación "
+        f"paso a paso de: '{description}'. "
+        "Sé específico con cantidades y tiempos de cocción. "
+        "Responde ÚNICAMENTE con JSON: "
+        "{ 'ingredientes': ['150g pechuga de pollo', '1 taza arroz integral'], "
+        "'pasos': ['Paso 1: ...', 'Paso 2: ...'], "
+        "'tiempo_preparacion': '25 minutos', "
+        "'tip_nutricional': 'Para maximizar la proteína...' }"
+    )
+    completion = client.with_options(timeout=15.0).chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        temperature=0.4,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    raw = completion.choices[0].message.content or ""
+    data = _extract_json(raw)
+    return {
+        "ingredientes": data.get("ingredientes", []) or [],
+        "pasos": data.get("pasos", []) or [],
+        "tiempo_preparacion": str(data.get("tiempo_preparacion", "")),
+        "tip_nutricional": str(data.get("tip_nutricional", "")),
+    }
+
+
+def generate_daily_summary(
+    meals: list[Meal],
+    goal_value: str,
+    objetivo_kcal: int,
+    macros_pct: dict,
+) -> dict:
+    client = _groq_client()
+    if not client:
+        raise RuntimeError("GROQ_API_KEY no configurada")
+    items = [
+        f"{m.nombre}: {float(m.kcal or 0)} kcal, P {float(m.proteina_g or 0)}g, C {float(m.carbos_g or 0)}g, G {float(m.grasas_g or 0)}g"
+        for m in meals
+    ]
+    total_kcal = round(sum(float(m.kcal or 0) for m in meals))
+    total_p = round(sum(float(m.proteina_g or 0) for m in meals))
+    total_c = round(sum(float(m.carbos_g or 0) for m in meals))
+    total_g = round(sum(float(m.grasas_g or 0) for m in meals))
+    prompt = (
+        "Eres un nutricionista deportivo. Analiza el plan alimentario "
+        "de hoy del usuario: "
+        f"Objetivo: {goal_value}, {objetivo_kcal} kcal diarias. "
+        f"Comidas de hoy: {' | '.join(items)}. "
+        f"Total consumido: {total_kcal} kcal, {total_p}g proteína, {total_c}g carbos, {total_g}g grasas. "
+        "Da un análisis breve y personalizado de 3-4 oraciones: "
+        "qué está bien, qué mejorar y una recomendación concreta para mañana. "
+        "Responde ÚNICAMENTE con JSON: "
+        "{ 'titulo': 'Título de 3-4 palabras', 'analisis': '...' }"
+    )
+    completion = client.with_options(timeout=15.0).chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        temperature=0.4,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    raw = completion.choices[0].message.content or ""
+    data = _extract_json(raw)
+    return {
+        "titulo": str(data.get("titulo", "Resumen nutricional")),
+        "analisis": str(data.get("analisis", "")),
+    }

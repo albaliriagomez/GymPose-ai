@@ -30,7 +30,14 @@ class MealCreate(BaseModel):
 
 
 class MealStatusUpdate(BaseModel):
-    status: str = Field(..., pattern="^(completed|pending)$")
+    status: Optional[str] = Field(None, pattern="^(completed|pending)$")
+    description: Optional[str] = None
+    hora: Optional[str] = None
+
+
+class MealRegenerateRequest(BaseModel):
+    meal_id: UUID
+    ingredientes: Optional[str] = None
 
 
 class MealItem(BaseModel):
@@ -52,3 +59,15 @@ class MealsResponse(BaseModel):
 class TipResponse(BaseModel):
     title: str
     tip: str
+
+
+class RecipeResponse(BaseModel):
+    ingredientes: list[str]
+    pasos: list[str]
+    tiempo_preparacion: str
+    tip_nutricional: str
+
+
+class DailySummaryResponse(BaseModel):
+    titulo: str
+    analisis: str

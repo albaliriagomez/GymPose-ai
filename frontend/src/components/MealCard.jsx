@@ -12,15 +12,19 @@ const MealCard = ({
   aiSuggested = false,
   onToggleStatus,
   toggling = false,
+  onOpenDetail,
+  onRegenerate,
+  regenerating = false,
 }) => {
   const isCompleted = status === "completed";
   const isInProgress = status === "in_progress";
 
   return (
     <div
+      onClick={() => onOpenDetail?.()}
       className={`
         relative flex items-center gap-4 rounded-lg p-4 border
-        transition-all duration-300 group
+        transition-all duration-300 group cursor-pointer
         ${isInProgress ? "bg-gym-card border-gym-yellow/30 shadow-md shadow-gym-yellow/10" : "bg-gym-card border-gym-border hover:border-gym-cyan/40 hover:shadow-md hover:shadow-gym-cyan/10"}
       `}
     >
@@ -46,11 +50,26 @@ const MealCard = ({
         <span className="text-[11px] text-gym-muted tabular-nums">{time}</span>
         <button
           type="button"
-          onClick={() => onToggleStatus?.(id, isCompleted ? "pending" : "completed")}
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleStatus?.(id, isCompleted ? "pending" : "completed");
+          }}
           disabled={toggling}
           className="transition-all duration-200 disabled:opacity-60"
         >
           {isCompleted ? <CheckIcon /> : <CircleIcon />}
+        </button>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onRegenerate?.();
+          }}
+          disabled={regenerating}
+          className="opacity-0 group-hover:opacity-100 text-[10px] text-gym-cyan border border-gym-cyan/30 px-2 py-0.5 rounded-md transition-all duration-200 disabled:opacity-50"
+          title="Regenerar"
+        >
+          🔄 Regenerar
         </button>
       </div>
     </div>

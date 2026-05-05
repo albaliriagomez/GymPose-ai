@@ -7,7 +7,16 @@ from sqlalchemy.orm import Session as DBSession
 
 from database import get_db
 from routers.auth import get_current_user
-from schemas.nutrition import MealCreate, MealStatusUpdate, MealsResponse, NutritionProfileResponse, TipResponse
+from schemas.nutrition import (
+    DailySummaryResponse,
+    MealCreate,
+    MealRegenerateRequest,
+    MealStatusUpdate,
+    MealsResponse,
+    NutritionProfileResponse,
+    RecipeResponse,
+    TipResponse,
+)
 from services import nutrition_service
 
 router = APIRouter(prefix="/nutrition", tags=["Nutrition"])
@@ -52,10 +61,77 @@ def patch_meal_status(
     db: DBSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    meal = nutrition_service.update_meal_status(db, current_user.id, meal_id, body.status)
+    meal = nutrition_service.update_meal_fields(
+        db,
+        current_user.id,
+        meal_id,
+        status=body.status,
+        description=body.description,
+        hora=body.hora,
+    )
     if not meal:
         raise HTTPException(status_code=404, detail="Comida no encontrada")
     return nutrition_service.meal_to_item(meal)
+
+
+@router.delete("/meals/{meal_id}")
+def delete_meal(
+    meal_id: UUID,
+    db: DBSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    ok = nutrition_service.delete_meal(db, current_user.id, meal_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Comida no encontrada")
+    return {"ok": True}
+
+
+@router.post("/meals/regenerate")
+def regenerate_meal(
+    body: MealRegenerateRequest,
+    db: DBSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    meal = nutrition_service.get_meal_by_id(db, current_user.id, body.meal_id)
+    if not meal:
+        raise HTTPException(status_code=404, detail="Comida no encontrada")
+    profile = nutrition_service.compute_nutrition_profile(current_user)
+    goal_key = profile.get("goal", nutrition_service.normalize_goal(current_user.goal))
+    kcal_estimadas = int(round(float(meal.kcal or (profile.get("objetivo_kcal", 2100) / 3))))
+    try:
+        alt = nutrition_service.regenerate_single_meal(
+            original_description=meal.descripcion or meal.nombre,
+            goal_value=nutrition_service.goal_text(goal_key),
+            kcal_estimadas=kcal_estimadas,
+            preferencia_alimentaria=current_user.preferencia_alimentaria,
+            alergias=current_user.alergias,
+            ingredientes=body.ingredientes,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"No se pudo regenerar la comida con IA: {exc}")
+    meal.descripcion = alt["description"] or meal.descripcion
+    meal.kcal = alt["kcal"]
+    meal.proteina_g = alt["proteina_g"]
+    meal.carbos_g = alt["carbos_g"]
+    meal.grasas_g = alt["grasas_g"]
+    db.commit()
+    db.refresh(meal)
+    return nutrition_service.meal_to_item(meal)
+
+
+@router.get("/meals/{meal_id}/recipe", response_model=RecipeResponse)
+def meal_recipe(
+    meal_id: UUID,
+    db: DBSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    meal = nutrition_service.get_meal_by_id(db, current_user.id, meal_id)
+    if not meal:
+        raise HTTPException(status_code=404, detail="Comida no encontrada")
+    try:
+        return nutrition_service.get_recipe_for_meal(meal.descripcion or meal.nombre)
+    except Exception:
+        raise HTTPException(status_code=500, detail="No se pudo obtener la receta. Intenta de nuevo.")
 
 
 @router.get("/tip", response_model=TipResponse)
@@ -126,3 +202,25 @@ def suggest_meals(
         "lastUpdated": datetime.now().strftime("%I:%M %p"),
         "meals": [nutrition_service.meal_to_item(m) for m in meals],
     }
+
+
+@router.get("/daily-summary", response_model=DailySummaryResponse)
+def daily_summary(
+    db: DBSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    meals = nutrition_service.get_meals_today(db, current_user.id)
+    if not meals:
+        raise HTTPException(status_code=400, detail="Registra tus comidas primero para obtener un análisis.")
+    profile = nutrition_service.compute_nutrition_profile(current_user)
+    goal_key = profile.get("goal", nutrition_service.normalize_goal(current_user.goal))
+    objetivo = int(profile.get("objetivo_kcal") or 2200)
+    try:
+        return nutrition_service.generate_daily_summary(
+            meals=meals,
+            goal_value=nutrition_service.goal_text(goal_key),
+            objetivo_kcal=objetivo,
+            macros_pct=profile.get("macros_pct") or {"proteina": 30, "carbos": 40, "grasas": 30},
+        )
+    except Exception:
+        raise HTTPException(status_code=500, detail="No se pudo generar el análisis del día. Intenta de nuevo.")
