@@ -116,6 +116,16 @@ def update_user_profile(
         user.height_cm = request.height_cm
     if request.goal is not None:
         user.goal = request.goal
+    if request.edad is not None:
+        user.edad = request.edad
+    if request.sexo is not None:
+        user.sexo = request.sexo
+    if request.nivel_actividad is not None:
+        user.nivel_actividad = request.nivel_actividad
+    if request.preferencia_alimentaria is not None:
+        user.preferencia_alimentaria = request.preferencia_alimentaria
+    if request.alergias is not None:
+        user.alergias = request.alergias
     
     db.commit()
     db.refresh(user)
