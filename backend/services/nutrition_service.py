@@ -1,5 +1,6 @@
 import json
 import os
+import ast
 from datetime import date, datetime
 
 from groq import Groq
@@ -12,6 +13,14 @@ from models.nutrition import Meal
 FALLBACK_TIP = {
     "title": "Hidratacion Inteligente",
     "tip": "Mantente hidratado durante el dia. Beber suficiente agua mejora tu rendimiento y recuperacion muscular.",
+}
+
+ACTIVITY_FACTORS = {
+    "sedentario": 1.2,
+    "ligero": 1.375,
+    "moderado": 1.55,
+    "activo": 1.725,
+    "muy_activo": 1.9,
 }
 
 
@@ -48,7 +57,8 @@ def compute_nutrition_profile(user: User) -> dict:
     else:
         tmb = 10 * user.weight_kg + 6.25 * user.height_cm - 5 * user.edad - 161
 
-    tdee = tmb * 1.55
+    factor = ACTIVITY_FACTORS.get((user.nivel_actividad or "").strip().lower(), 1.375)
+    tdee = tmb * factor
     goal_key = normalize_goal(user.goal)
     adjustment = {"lose": -300, "maintain": 0, "gain": 250}[goal_key]
 
@@ -102,6 +112,25 @@ def get_meals_today(db: Session, user_id):
 
 
 def create_meal(db: Session, user_id, payload):
+    kcal_input = payload.get("kcal")
+    try:
+        kcal_value = float(kcal_input) if kcal_input is not None else 0.0
+    except (TypeError, ValueError):
+        kcal_value = 0.0
+    should_estimate = kcal_input is None or kcal_value == 0
+
+    proteina = payload.get("proteina_g")
+    carbos = payload.get("carbos_g")
+    grasas = payload.get("grasas_g")
+    kcal = payload.get("kcal")
+
+    if should_estimate:
+        estimated = estimate_meal_macros(payload.get("description"))
+        kcal = estimated["kcal"]
+        proteina = estimated["proteina_g"]
+        carbos = estimated["carbos_g"]
+        grasas = estimated["grasas_g"]
+
     meal = Meal(
         user_id=user_id,
         fecha=date.today(),
@@ -109,10 +138,10 @@ def create_meal(db: Session, user_id, payload):
         descripcion=payload.get("description"),
         hora=parse_time_12h(payload.get("hora")) if payload.get("hora") else None,
         status="completed",
-        proteina_g=payload.get("proteina_g"),
-        carbos_g=payload.get("carbos_g"),
-        grasas_g=payload.get("grasas_g"),
-        kcal=payload.get("kcal"),
+        proteina_g=proteina if proteina is not None else 0,
+        carbos_g=carbos if carbos is not None else 0,
+        grasas_g=grasas if grasas is not None else 0,
+        kcal=kcal if kcal is not None else 0,
         ai_suggested=payload.get("ai_suggested", False),
     )
     db.add(meal)
@@ -149,7 +178,11 @@ def _extract_json(content: str):
     end = content.rfind("}")
     if start == -1 or end == -1:
         raise ValueError("invalid json payload")
-    return json.loads(content[start : end + 1])
+    raw_json = content[start : end + 1].strip()
+    try:
+        return json.loads(raw_json)
+    except json.JSONDecodeError:
+        return ast.literal_eval(raw_json)
 
 
 def _groq_client():
@@ -159,15 +192,62 @@ def _groq_client():
     return Groq(api_key=key)
 
 
-def generate_tip(goal_value: str, consumed_kcal: int, objetivo_kcal: int) -> dict:
+def estimate_meal_macros(description: str | None) -> dict:
+    client = _groq_client()
+    if not client:
+        return {"kcal": 0, "proteina_g": 0, "carbos_g": 0, "grasas_g": 0}
+    text = (description or "").strip()
+    if not text:
+        return {"kcal": 0, "proteina_g": 0, "carbos_g": 0, "grasas_g": 0}
+    prompt = (
+        "Eres un nutricionista experto. Estima los macronutrientes y "
+        f"calorias de esta comida: '{text}'. "
+        "Responde UNICAMENTE con JSON valido: "
+        "{ 'kcal': 350, 'proteina_g': 25, 'carbos_g': 40, 'grasas_g': 12 } "
+        "Los valores deben ser numeros enteros realistas. Sin texto extra."
+    )
+    try:
+        print(f"[NUTRITION][MEAL_ESTIMATE] texto_enviado={text}")
+        completion = client.with_options(timeout=15.0).chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            temperature=0.2,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = completion.choices[0].message.content or ""
+        print(f"[NUTRITION][MEAL_ESTIMATE] raw_response={raw}")
+        data = _extract_json(raw)
+        extracted = {
+            "kcal": int(data.get("kcal", 0) or 0),
+            "proteina_g": int(data.get("proteina_g", 0) or 0),
+            "carbos_g": int(data.get("carbos_g", 0) or 0),
+            "grasas_g": int(data.get("grasas_g", 0) or 0),
+        }
+        print(f"[NUTRITION][MEAL_ESTIMATE] extraido={extracted}")
+        return extracted
+    except Exception:
+        print("[NUTRITION][MEAL_ESTIMATE] fallo_estimacion, usando_ceros")
+        return {"kcal": 0, "proteina_g": 0, "carbos_g": 0, "grasas_g": 0}
+
+
+def generate_tip(
+    goal_value: str,
+    consumed_kcal: int,
+    objetivo_kcal: int,
+    preferencia_alimentaria: str | None = None,
+    alergias: str | None = None,
+) -> dict:
     client = _groq_client()
     if not client:
         return FALLBACK_TIP
 
+    preferencia = (preferencia_alimentaria or "").strip() or "sin restricciones"
+    alergias_text = (alergias or "").strip() or "ninguna"
     prompt = (
         "Eres un nutricionista deportivo experto. El usuario tiene como "
         f"objetivo {goal_value}. Hoy ha consumido {consumed_kcal} kcal de su objetivo de "
-        f"{objetivo_kcal} kcal. Responde UNICAMENTE con un objeto JSON valido con esta "
+        f"{objetivo_kcal} kcal. Preferencia alimentaria: {preferencia}. "
+        f"Alergias o intolerancias: {alergias_text}. "
+        "Responde UNICAMENTE con un objeto JSON valido con esta "
         "estructura: { 'title': 'titulo corto de 2-4 palabras', 'tip': 'tip de 2-3 oraciones' } "
         "El tip debe ser personalizado, practico y motivador en espanol. "
         "Sin texto adicional fuera del JSON."
@@ -187,7 +267,13 @@ def generate_tip(goal_value: str, consumed_kcal: int, objetivo_kcal: int) -> dic
         return FALLBACK_TIP
 
 
-def generate_meal_plan(goal_value: str, objetivo_kcal: int, macros_pct: dict) -> list[dict]:
+def generate_meal_plan(
+    goal_value: str,
+    objetivo_kcal: int,
+    macros_pct: dict,
+    preferencia_alimentaria: str | None = None,
+    alergias: str | None = None,
+) -> list[dict]:
     fallback_meals = [
         {
             "name": "Desayuno",
@@ -223,14 +309,21 @@ def generate_meal_plan(goal_value: str, objetivo_kcal: int, macros_pct: dict) ->
         if not client:
             return fallback_meals
 
+        preferencia = (preferencia_alimentaria or "").strip() or "sin restricciones"
+        alergias_text = (alergias or "").strip() or "ninguna"
         prompt = (
-            "Eres un nutricionista deportivo. El usuario quiere "
-            f"{goal_value} y su objetivo calorico diario es {objetivo_kcal} kcal con "
-            f"distribucion de macros: {macros_pct['proteina']}% proteina, {macros_pct['carbos']}% carbohidratos, "
-            f"{macros_pct['grasas']}% grasas. Crea un plan de 3 comidas para hoy (desayuno, almuerzo, cena) en espanol. "
-            "Responde UNICAMENTE con JSON valido con esta estructura exacta: "
-            "{ 'meals': [ { 'name': 'Desayuno', 'description': 'descripcion concreta de los alimentos', "
-            "'kcal': 600, 'proteina_g': 40, 'carbos_g': 60, 'grasas_g': 20, 'hora': '08:00 AM' } ] } "
+            "Eres un nutricionista deportivo personalizado. "
+            f"Objetivo del usuario: {goal_value}. "
+            f"Calorias diarias objetivo: {objetivo_kcal} kcal. "
+            f"Distribucion de macros: {macros_pct['proteina']}% proteina, {macros_pct['carbos']}% carbohidratos, {macros_pct['grasas']}% grasas. "
+            f"Preferencia alimentaria: {preferencia}. "
+            f"Alergias o intolerancias: {alergias_text}. "
+            "Crea un plan de 3 comidas VARIADAS y ESPECIFICAS para hoy (desayuno, almuerzo, cena) "
+            "respetando estrictamente las preferencias y alergias del usuario. Incluye cantidades "
+            "concretas (ej: '150g de pechuga de pollo', '1 taza de avena'). "
+            "Responde UNICAMENTE con este JSON exacto: "
+            "{ 'meals': [ { 'name': 'Desayuno', 'description': '...', 'kcal': 600, 'proteina_g': 40, "
+            "'carbos_g': 60, 'grasas_g': 20, 'hora': '08:00 AM' } ] } "
             f"Las 3 comidas deben sumar aproximadamente {objetivo_kcal} kcal."
         )
         completion = client.with_options(timeout=15.0).chat.completions.create(

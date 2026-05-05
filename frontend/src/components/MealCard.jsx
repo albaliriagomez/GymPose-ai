@@ -5,6 +5,7 @@ const MealCard = ({
   name,
   description,
   time,
+  kcal = 0,
   status = "pending",
   macros = { proteina: 30, carbos: 50, grasas: 15 },
   emoji = "🍽️",
@@ -37,6 +38,7 @@ const MealCard = ({
           <MacroTag dot="bg-gym-cyan" label="Proteina" value={macros.proteina} />
           <MacroTag dot="bg-gym-yellow" label="Carbos" value={macros.carbos} />
           <MacroTag dot="bg-red-400" label="Grasas" value={macros.grasas} />
+          <MacroTag dot="bg-slate-300" label="KCAL" value={Math.round(Number.isFinite(kcal) ? kcal : 0)} unit="" textColor="text-slate-200" />
         </div>
       </div>
 
@@ -55,10 +57,10 @@ const MealCard = ({
   );
 };
 
-const MacroTag = ({ dot, label, value }) => (
-  <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-gym-muted px-2 py-0.5 rounded-full border border-gym-border bg-gym-border/30">
+const MacroTag = ({ dot, label, value, unit = "g", textColor = "text-gym-muted" }) => (
+  <span className={`inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide ${textColor} px-2 py-0.5 rounded-full border border-gym-border bg-gym-border/30`}>
     <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${dot}`} />
-    {label}: {value}g
+    {label}: {value}{unit}
   </span>
 );
 

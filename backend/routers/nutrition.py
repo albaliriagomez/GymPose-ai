@@ -68,7 +68,11 @@ def get_tip(
     goal_key = profile.get("goal", nutrition_service.normalize_goal(current_user.goal))
     objetivo = profile.get("objetivo_kcal") or 2200
     return nutrition_service.generate_tip(
-        nutrition_service.goal_text(goal_key), consumed, int(objetivo)
+        nutrition_service.goal_text(goal_key),
+        consumed,
+        int(objetivo),
+        current_user.preferencia_alimentaria,
+        current_user.alergias,
     )
 
 
@@ -98,6 +102,8 @@ def suggest_meals(
             nutrition_service.goal_text(profile["goal"]),
             profile["objetivo_kcal"],
             profile["macros_pct"],
+            current_user.preferencia_alimentaria,
+            current_user.alergias,
         )
     except Exception:
         raise HTTPException(status_code=502, detail="No se pudo generar el plan de comidas")
