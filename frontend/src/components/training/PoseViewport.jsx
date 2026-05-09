@@ -4,6 +4,8 @@ export default function PoseViewport({
   cameraError,
   poseError,
   isLive,
+  statusMessage,
+  exerciseLabel = 'Sentadilla',
 }) {
   const statusText = isLive
     ? 'Camara encendida'
@@ -15,6 +17,9 @@ export default function PoseViewport({
         <div>
           <p className="text-[10px] font-mono uppercase tracking-[0.28em] text-gym-cyan">Vista en vivo</p>
           <h2 className="mt-1 font-display text-2xl font-bold text-white">Tu camara</h2>
+          <p className="mt-1 text-xs font-mono text-gym-muted">
+            {exerciseLabel} · {statusMessage || 'Listo para comenzar'}
+          </p>
         </div>
         <span className={`rounded-full px-3 py-1 text-[10px] font-mono uppercase tracking-[0.2em] ${
           isLive ? 'bg-gym-green/10 text-gym-green' : 'bg-gym-accent text-gym-muted'

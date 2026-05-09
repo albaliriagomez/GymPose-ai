@@ -5,36 +5,69 @@ import { drawPoseLandmarks, resizeCanvasToVideo } from '../lib/poseDrawing'
 import { useRepCounter } from './useRepCounter'
 import { useSquatValidator } from './useSquatValidator'
 
-export function useLivePose({ videoRef, canvasRef, isRunning }) {
+export function useLivePose({
+  videoRef,
+  canvasRef,
+  isRunning,
+  exerciseMode = 'squat',
+  curlArmSide = 'left',
+  curlRepsPerArm = 10,
+}) {
   const landmarkerRef = useRef(null)
   const frameRequestRef = useRef(0)
   const lastVideoTimeRef = useRef(-1)
   const lastUiUpdateRef = useRef(0)
 
+  const isArmMode = exerciseMode === 'bicep' || exerciseMode === 'curl'
+
   const [status, setStatus] = useState('loading')
   const [error, setError] = useState('')
   const [insights, setInsights] = useState({
+    exerciseMode,
     hasPose: false,
-    hasFullBody: false,
+    hasRequiredView: false,
+    requiredView: isArmMode ? 'arm' : 'full',
     bodyCoverage: 0,
     kneeAngle: null,
     torsoAngle: null,
+    elbowAngle: null,
+    leftElbowAngle: null,
+    rightElbowAngle: null,
     repCount: 0,
-    feedback: 'Inicializando detector de pose',
+    currentArm: curlArmSide,
+    armRepCount: 0,
+    targetPerArm: curlRepsPerArm,
+    isComplete: false,
+    feedback: exerciseMode === 'curl'
+      ? 'Inicializando detector de bíceps'
+      : exerciseMode === 'bicep'
+        ? 'Inicializando detector de hombros'
+        : 'Inicializando detector de pose',
   })
 
   const squatValidation = useSquatValidator({
+    exerciseMode,
     kneeAngle: insights.kneeAngle,
     torsoAngle: insights.torsoAngle,
+    elbowAngle: insights.elbowAngle,
+    leftElbowAngle: insights.leftElbowAngle,
+    rightElbowAngle: insights.rightElbowAngle,
+    curlArmSide,
     hasPose: insights.hasPose,
-    hasFullBody: insights.hasFullBody,
+    hasRequiredView: insights.hasRequiredView,
     bodyCoverage: insights.bodyCoverage,
     enabled: isRunning,
   })
 
   const repCounter = useRepCounter({
+    exerciseMode,
     kneeAngle: insights.kneeAngle,
     torsoAngle: insights.torsoAngle,
+    elbowAngle: insights.elbowAngle,
+    leftElbowAngle: insights.leftElbowAngle,
+    rightElbowAngle: insights.rightElbowAngle,
+    curlArmSide,
+    curlRepsPerArm,
     hasPose: insights.hasPose,
     isValid: squatValidation.isValid,
     enabled: isRunning,
@@ -80,10 +113,6 @@ export function useLivePose({ videoRef, canvasRef, isRunning }) {
       const canvas = canvasRef.current
       const ctx = canvas?.getContext?.('2d')
       if (ctx && canvas) ctx.clearRect(0, 0, canvas.width, canvas.height)
-      setInsights((current) => ({
-        ...current,
-        hasPose: false,
-      }))
       return undefined
     }
 
@@ -109,12 +138,12 @@ export function useLivePose({ videoRef, canvasRef, isRunning }) {
         const ctx = canvas.getContext('2d')
 
         if (ctx) {
-          drawPoseLandmarks(ctx, result, canvas.width, canvas.height)
+          drawPoseLandmarks(ctx, result, canvas.width, canvas.height, exerciseMode)
         }
 
         const now = performance.now()
         if (now - lastUiUpdateRef.current > 120) {
-          setInsights(buildPoseInsights(result))
+          setInsights(buildPoseInsights(result, exerciseMode))
           lastUiUpdateRef.current = now
         }
 
@@ -124,25 +153,39 @@ export function useLivePose({ videoRef, canvasRef, isRunning }) {
       frameRequestRef.current = window.requestAnimationFrame(renderFrame)
     }
 
-    setStatus((current) => (current === 'ready' ? 'tracking' : current))
     frameRequestRef.current = window.requestAnimationFrame(renderFrame)
 
     return () => {
       window.cancelAnimationFrame(frameRequestRef.current)
     }
-  }, [canvasRef, isRunning, status, videoRef])
+  }, [canvasRef, exerciseMode, isRunning, status, videoRef])
+
+  const effectiveStatus = status === 'ready' && isRunning ? 'tracking' : status
 
   return {
-    status,
+    status: effectiveStatus,
     error,
     insights: {
       ...insights,
+      exerciseMode,
+      hasPose: isRunning ? insights.hasPose : false,
+      requiredView: isArmMode ? 'arm' : 'full',
       repCount: repCounter.repCount,
+      currentArm: repCounter.currentArm,
+      armRepCount: repCounter.armRepCount,
+      targetPerArm: repCounter.targetPerArm,
+      isComplete: repCounter.isComplete,
       validation: squatValidation,
       feedback: squatValidation.feedback || insights.feedback,
     },
     repCount: repCounter.repCount,
+    repPlan: {
+      currentArm: repCounter.currentArm,
+      armRepCount: repCounter.armRepCount,
+      targetPerArm: repCounter.targetPerArm,
+      isComplete: repCounter.isComplete,
+    },
     squatValidation,
-    isReady: status === 'ready' || status === 'tracking',
+    isReady: effectiveStatus === 'ready' || effectiveStatus === 'tracking',
   }
 }

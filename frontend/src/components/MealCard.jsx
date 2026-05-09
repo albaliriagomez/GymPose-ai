@@ -73,15 +73,15 @@ const MealCard = ({
         </button>
       </div>
     </div>
-  );
-};
+  )
+}
 
 const MacroTag = ({ dot, label, value, unit = "g", textColor = "text-gym-muted" }) => (
   <span className={`inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide ${textColor} px-2 py-0.5 rounded-full border border-gym-border bg-gym-border/30`}>
     <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${dot}`} />
     {label}: {value}{unit}
   </span>
-);
+)
 
 const CheckIcon = () => (
   <div className="w-5 h-5 rounded-full bg-gym-cyan/15 flex items-center justify-center transition-all duration-200">
@@ -89,7 +89,7 @@ const CheckIcon = () => (
       <path d="M2 6.5l3 3 5-5" stroke="#00e5ff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   </div>
-);
+)
 
 const CircleIcon = () => <div className="w-5 h-5 rounded-full border-2 border-gym-border transition-all duration-200" />;
 
