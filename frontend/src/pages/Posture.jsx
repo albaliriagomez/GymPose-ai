@@ -174,10 +174,11 @@ export default function Posture() {
       const formData = new FormData();
       formData.append('file', file);
 
-     const response = await fetch(`${API_URL}/posture/analyze?token=${token}`, {
-  method: 'POST',
-  body: formData,
-});
+      const response = await fetch(`${API_URL}/posture/analyze`, {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        body: formData,
+      })
 
       if (!response.ok) {
         const err = await response.json().catch(() => ({}));
@@ -195,7 +196,7 @@ export default function Posture() {
     } finally {
       setIsAnalyzing(false);
     }
-  }, []);
+  }, [token]);
 
   const showResults = analysisData?.success === true;
   const angles      = analysisData?.angles ?? [];

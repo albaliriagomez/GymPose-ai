@@ -1,6 +1,7 @@
 export default function TrainingSessionHeader({
   isLive,
   onToggleSession,
+  exerciseLabel = 'Sentadilla',
   disabled = false,
 }) {
   return (
@@ -14,6 +15,9 @@ export default function TrainingSessionHeader({
         </h1>
         <p className="mt-2 max-w-2xl text-sm leading-6 text-gym-muted">
           Enciende tu camara para verte en pantalla y seguir tu movimiento en tiempo real.
+        </p>
+        <p className="mt-2 inline-flex rounded-full border border-gym-cyan/20 bg-gym-cyan/10 px-3 py-1 text-[10px] font-mono uppercase tracking-[0.22em] text-gym-cyan">
+          Modo activo: {exerciseLabel}
         </p>
       </div>
 

@@ -15,8 +15,10 @@ export function useCameraStream(videoRef) {
   const [isStarting, setIsStarting] = useState(false)
 
   useEffect(() => {
+    const videoElement = videoRef.current
+
     return () => {
-      stopCamera(videoRef.current)
+      stopCamera(videoElement)
     }
   }, [videoRef])
 

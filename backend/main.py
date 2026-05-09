@@ -1,13 +1,11 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from database import engine, Base
+from sqlalchemy.exc import OperationalError
 
 from models import User, Session, Repetition, Nutrition, Notification
 from routers import auth, posture, notifications, users, nutrition, dashboard, training 
 
 import init_db
-
-Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="GymPose AI API", version="1.0.0")
 
@@ -43,8 +41,12 @@ def health_check():
 
 @app.on_event("startup")
 async def startup():
-    init_db.create_tables()
-    print("Backend iniciado correctamente")
+    try:
+        init_db.create_tables()
+        print("Backend iniciado correctamente")
+    except OperationalError as exc:
+        print(f"Error conectando a la base de datos: {exc}")
+        raise
 
 @app.on_event("shutdown")
 async def shutdown():

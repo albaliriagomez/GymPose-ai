@@ -1,68 +1,163 @@
-import { useEffect, useState } from 'react'
+import { useMemo } from 'react'
 
-const DEPTH_THRESHOLD = 160
-const TORSO_THRESHOLD = 40
+const SQUAT_DEPTH_THRESHOLD = 165
+const SQUAT_TORSO_THRESHOLD = 60
+const CURL_FLEX_THRESHOLD = 70
+const PRESS_EXTENSION_THRESHOLD = 160
 
 export function useSquatValidator({
+  exerciseMode = 'squat',
   kneeAngle,
   torsoAngle,
+  elbowAngle,
+  leftElbowAngle,
+  rightElbowAngle,
+  curlArmSide = 'left',
   hasPose,
-  hasFullBody,
+  hasRequiredView,
   bodyCoverage = 0,
   enabled = false,
 }) {
-  const [validation, setValidation] = useState({
-    isReady: false,
-    isValid: false,
-    deepEnough: false,
-    torsoStable: false,
-    hasFullBody: false,
-    bodyCoverage: 0,
-    feedback: 'Activa la camara para validar la sentadilla.',
-  })
+  return useMemo(() => {
+    const isArmMode = exerciseMode === 'press' || exerciseMode === 'curl'
+    const activeElbowAngle =
+      exerciseMode === 'curl'
+        ? curlArmSide === 'left'
+          ? leftElbowAngle
+          : rightElbowAngle
+        : elbowAngle
 
-  useEffect(() => {
-    if (!enabled) {
-      setValidation({
-        isReady: false,
-        isValid: false,
-        deepEnough: false,
-        torsoStable: false,
-        hasFullBody: false,
-        bodyCoverage: 0,
-        feedback: 'Activa la camara para validar la sentadilla.',
-      })
-      return
+    const armLabel = curlArmSide === 'left' ? 'izquierdo' : 'derecho'
+
+    const baseValidation = {
+      isReady: false,
+      isValid: false,
+      deepEnough: false,
+      torsoStable: false,
+      hasRequiredView: false,
+      requiredView: isArmMode ? 'arm' : 'full',
+      bodyCoverage: 0,
+      feedback: isArmMode
+        ? exerciseMode === 'curl'
+          ? 'Activa la camara para validar el curl de biceps.'
+          : 'Activa la camara para validar el press militar.'
+        : 'Activa la camara para validar la sentadilla.',
     }
 
-    if (!hasPose || kneeAngle == null || torsoAngle == null) {
-      setValidation({
-        isReady: false,
-        isValid: false,
-        deepEnough: false,
-        torsoStable: false,
-        hasFullBody: false,
+    if (!enabled) {
+      return baseValidation
+    }
+
+    if (!hasPose) {
+      return {
+        ...baseValidation,
+        bodyCoverage,
+        feedback: isArmMode
+          ? exerciseMode === 'curl'
+            ? 'Ponte frente a la camara para empezar a contar curls.'
+            : 'Ponte frente a la camara para empezar a contar presses.'
+          : 'Ponte frente a la camara para empezar a contar sentadillas.',
+      }
+    }
+
+    if (exerciseMode === 'curl') {
+      if (activeElbowAngle == null) {
+        return {
+          ...baseValidation,
+          bodyCoverage,
+          feedback: `Necesito ver el brazo ${armLabel} para medir el curl.`,
+        }
+      }
+
+      if (!hasRequiredView) {
+        return {
+          ...baseValidation,
+          bodyCoverage,
+          feedback: `No veo tu parte superior del cuerpo completa. Ajusta la camara para mostrar hombros, codos y munecas (${bodyCoverage}%).`,
+        }
+      }
+
+      const deepEnough = activeElbowAngle <= CURL_FLEX_THRESHOLD
+      const torsoStable = torsoAngle == null ? true : torsoAngle <= SQUAT_TORSO_THRESHOLD
+
+      let feedback = `Curl detectado con el brazo ${armLabel}.`
+
+      if (!deepEnough) {
+        feedback = `Flexiona un poco mas el codo ${armLabel} para completar el curl.`
+      } else if (!torsoStable) {
+        feedback = 'Mantén el torso mas estable y evita balancearte.'
+      }
+
+      return {
+        ...baseValidation,
+        isReady: true,
+        isValid: deepEnough,
+        deepEnough,
+        torsoStable,
+        hasRequiredView: true,
+        bodyCoverage,
+        feedback,
+      }
+    }
+
+    if (exerciseMode === 'press') {
+      if (elbowAngle == null) {
+        return {
+          ...baseValidation,
+          bodyCoverage,
+          feedback: 'Necesito ver hombros, codos y munecas para medir el press militar.',
+        }
+      }
+
+      if (!hasRequiredView) {
+        return {
+          ...baseValidation,
+          bodyCoverage,
+          feedback: `No veo tu tren superior completo. Ajusta la camara para mostrar hombros, codos y munecas (${bodyCoverage}%).`,
+        }
+      }
+
+      const deepEnough = elbowAngle >= PRESS_EXTENSION_THRESHOLD
+      const torsoStable = torsoAngle == null ? true : torsoAngle <= SQUAT_TORSO_THRESHOLD
+
+      let feedback = 'Press militar detectado.'
+
+      if (!deepEnough) {
+        feedback = 'Extiende un poco mas los brazos para completar el press militar.'
+      } else if (!torsoStable) {
+        feedback = 'Mantén el torso mas estable y evita balancearte.'
+      }
+
+      return {
+        ...baseValidation,
+        isReady: true,
+        isValid: deepEnough,
+        deepEnough,
+        torsoStable,
+        hasRequiredView: true,
+        bodyCoverage,
+        feedback,
+      }
+    }
+
+    if (kneeAngle == null || torsoAngle == null) {
+      return {
+        ...baseValidation,
         bodyCoverage,
         feedback: 'Ponte frente a la camara para empezar a contar sentadillas.',
-      })
-      return
+      }
     }
 
-    if (!hasFullBody) {
-      setValidation({
-        isReady: false,
-        isValid: false,
-        deepEnough: false,
-        torsoStable: false,
-        hasFullBody: false,
+    if (!hasRequiredView && bodyCoverage < 65) {
+      return {
+        ...baseValidation,
         bodyCoverage,
-        feedback: `No veo tu cuerpo completo. Ajusta la camara para mostrar hombros, cadera, rodillas y tobillos (${bodyCoverage}%).`,
-      })
-      return
+        feedback: `Aun falta un poco de cuerpo visible para validar bien la sentadilla (${bodyCoverage}%).`,
+      }
     }
 
-    const deepEnough = kneeAngle <= DEPTH_THRESHOLD
-    const torsoStable = torsoAngle <= TORSO_THRESHOLD
+    const deepEnough = kneeAngle <= SQUAT_DEPTH_THRESHOLD
+    const torsoStable = torsoAngle <= SQUAT_TORSO_THRESHOLD
     const isValid = deepEnough && torsoStable
 
     let feedback = 'Sentadilla detectada.'
@@ -75,16 +170,15 @@ export function useSquatValidator({
       feedback = 'Buena repeticion. Mantén el control en la subida.'
     }
 
-    setValidation({
+    return {
+      ...baseValidation,
       isReady: true,
       isValid,
       deepEnough,
       torsoStable,
-      hasFullBody: true,
+      hasRequiredView: true,
       bodyCoverage,
       feedback,
-    })
-  }, [bodyCoverage, enabled, hasFullBody, hasPose, kneeAngle, torsoAngle])
-
-  return validation
+    }
+  }, [bodyCoverage, curlArmSide, enabled, elbowAngle, exerciseMode, hasPose, hasRequiredView, kneeAngle, leftElbowAngle, rightElbowAngle, torsoAngle])
 }

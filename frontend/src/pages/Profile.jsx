@@ -16,10 +16,9 @@ export default function Profile() {
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState(false);
-  const token = localStorage.getItem("gympose_token");
 
   useEffect(() => {
-    getProfile(token)
+    getProfile()
       .then((data) => {
         setUser(data);
         setForm({
@@ -35,7 +34,7 @@ export default function Profile() {
         });
       })
       .catch((err) => console.error("ERROR:", err.response?.data || err.message));
-  }, [token]);
+  }, []);
 
   const validate = () => {
     const e = {};
@@ -56,7 +55,7 @@ export default function Profile() {
     setErrors({});
     setSaving(true);
     try {
-      const updated = await updateProfile(token, {
+      const updated = await updateProfile({
         name: form.name,
         weight_kg: form.weight_kg ? Number(form.weight_kg) : null,
         height_cm: form.height_cm ? Number(form.height_cm) : null,
@@ -213,3 +212,4 @@ export default function Profile() {
     </DashboardLayout>
   );
 }
+

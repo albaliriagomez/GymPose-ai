@@ -63,7 +63,7 @@ const Nutrition = () => {
         actionLoading={nutrition.actionLoading}
       />
     </div>
-  );
-};
+  )
+}
 
-export default Nutrition;
+export default Nutrition

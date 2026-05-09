@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useAuth } from '../context/AuthContext'
+import { useAuth } from '../context/authContext.js'
 import DashboardLayout from '../components/DashboardLayout'
 import {
   getDashboardStats,
@@ -27,7 +27,6 @@ const CustomTooltip = ({ active, payload, label }) => active && payload?.length 
 export default function Dashboard() {
   const { user } = useAuth()
   const navigate = useNavigate()
-  const token = localStorage.getItem('gympose_token')
 
   const [stats, setStats]       = useState(null)
   const [weekly, setWeekly]     = useState([])
@@ -41,10 +40,10 @@ export default function Dashboard() {
     const load = async () => {
       try {
         const [s, w, a, t] = await Promise.all([
-          getDashboardStats(token),
-          getWeeklySummary(token),
-          getLastAnalysis(token),
-          getDashboardTips(token),
+          getDashboardStats(),
+          getWeeklySummary(),
+          getLastAnalysis(),
+          getDashboardTips(),
         ])
         setStats(s); setWeekly(w); setAnalysis(a); setTips(t)
       } catch (err) {
@@ -90,6 +89,26 @@ export default function Dashboard() {
             style={{ background: 'linear-gradient(135deg,#00e5ff,#00b8d4)', boxShadow: '0 0 25px rgba(0,229,255,0.4)' }}>
             <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4"><polygon points="5,3 19,12 5,21"/></svg>
             Empezar Entrenamiento Nuevo
+          </button>
+        </div>
+
+        <div className="rounded-2xl border border-gym-border bg-gym-sidebar p-4 flex items-center justify-between gap-4">
+          <div>
+            <p className="text-[10px] font-mono uppercase tracking-[0.22em] text-gym-muted">
+              Progreso personalizado
+            </p>
+            <h2 className="mt-1 font-display text-xl font-bold text-white">
+              Rutina, objetivo y avance
+            </h2>
+            <p className="mt-1 text-sm text-gym-muted">
+              Revisa tu plan semanal y registra avances sin salir del panel.
+            </p>
+          </div>
+          <button
+            onClick={() => navigate('/progress')}
+            className="rounded-xl border border-gym-cyan/30 bg-gym-cyan/10 px-4 py-3 text-sm font-mono uppercase tracking-[0.18em] text-gym-cyan hover:bg-gym-cyan/20 transition-all"
+          >
+            Ver progreso
           </button>
         </div>
 

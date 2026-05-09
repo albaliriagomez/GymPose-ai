@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Header, status
 from sqlalchemy.orm import Session
 from datetime import timedelta
+from typing import Optional
 
 from database import get_db
 from models import User
@@ -12,15 +13,34 @@ from schemas.auth import (
     TokenResponse
 )
 from services.auth_service import AuthService
-from fastapi.security import OAuth2PasswordBearer
-
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
-    user_id = AuthService.get_user_id_from_token(token)
-    
+def _resolve_token(
+    token: Optional[str] = None,
+    authorization: Optional[str] = None,
+) -> str:
+    if token:
+        return token
+
+    if authorization and authorization.lower().startswith("bearer "):
+        return authorization.split(" ", 1)[1].strip()
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Token faltante",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
+def get_current_user(
+    token: Optional[str] = None,
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+) -> User:
+    token_value = _resolve_token(token=token, authorization=authorization)
+    user_id = AuthService.get_user_id_from_token(token_value)
+
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(
@@ -93,20 +113,22 @@ def login(request: LoginRequest, db: Session = Depends(get_db)):
 
 @router.get("/me", response_model=UserResponse)
 def get_current_user_profile(
-    token: str,
+    token: Optional[str] = None,
+    authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db)
 ):
-    user = get_current_user(token, db)
+    user = get_current_user(token=token, authorization=authorization, db=db)
     return UserResponse.model_validate(user)
 
 
 @router.put("/me", response_model=UserResponse)
 def update_user_profile(
     request: UpdateProfileRequest,
-    token: str,
+    token: Optional[str] = None,
+    authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db)
 ):
-    user = get_current_user(token, db)
+    user = get_current_user(token=token, authorization=authorization, db=db)
     
     if request.name is not None:
         user.name = request.name

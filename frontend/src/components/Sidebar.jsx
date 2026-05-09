@@ -1,5 +1,5 @@
 import { NavLink, useNavigate } from 'react-router-dom'
-import { useAuth } from '../context/AuthContext'
+import { useAuth } from '../context/authContext.js'
 
 const Item = ({ to, label, icon }) => (
   <NavLink to={to}
@@ -40,6 +40,10 @@ export default function Sidebar() {
           <svg viewBox="0 0 24 24" fill="currentColor">
             <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
             <rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
+          </svg>} />
+        <Item to="/progress" label="Progreso" icon={
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M4 19h16M6 16V9M12 16V5M18 16v-7"/>
           </svg>} />
         <Item to="/training" label="Entrenar" icon={
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">

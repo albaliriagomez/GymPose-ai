@@ -1,5 +1,4 @@
-import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useState, useEffect, useCallback } from 'react'
 import DashboardLayout from '../components/DashboardLayout'
 import { getNotifications, markAsRead, markAllRead } from '../services/notificationService'
 
@@ -20,28 +19,27 @@ export default function Notifications() {
   const [notifications, setNotifications] = useState([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('all') // 'all' | 'unread'
-  const token = localStorage.getItem('gympose_token')
 
-  const load = async () => {
+  const load = useCallback(async () => {
     try {
-      const data = await getNotifications(token)
+      const data = await getNotifications()
       setNotifications(data)
     } catch (err) {
       console.error(err)
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { load() }, [load])
 
   const handleMarkRead = async (id) => {
-    await markAsRead(token, id)
+    await markAsRead(id)
     setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n))
   }
 
   const handleMarkAll = async () => {
-    await markAllRead(token)
+    await markAllRead()
     setNotifications(prev => prev.map(n => ({ ...n, read: true })))
   }
 
