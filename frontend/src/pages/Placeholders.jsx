@@ -1,5 +1,6 @@
 import DashboardLayout from '../components/DashboardLayout'
 import NutritionModule from './Nutrition'
+import SettingsPage from './Settings'
 
 const Page = ({ title }) => (
   <DashboardLayout>
@@ -18,4 +19,8 @@ export const Nutrition = () => (
     <NutritionModule />
   </DashboardLayout>
 )
-export const Settings  = () => <Page title="Ajustes" />
+export const Settings  = () => (
+  <DashboardLayout>
+    <SettingsPage />
+  </DashboardLayout>
+)

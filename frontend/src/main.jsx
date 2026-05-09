@@ -15,6 +15,7 @@ import Posture from './pages/Posture'
 import TrainingPlan from './pages/TrainingPlan'
 
 
+
 import Notifications from './pages/Notifications'
 import Profile from './pages/Profile'
 
@@ -38,6 +39,7 @@ createRoot(document.getElementById('root')).render(
           <Route path="*"           element={<Navigate to="/login" replace />} />
           <Route path="/notifications" element={<ProtectedRoute><Notifications /></ProtectedRoute>} />
           <Route path="/profile"       element={<ProtectedRoute><Profile /></ProtectedRoute>} />
+          <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
         </Routes>
       </BrowserRouter>
     </AuthProvider>
