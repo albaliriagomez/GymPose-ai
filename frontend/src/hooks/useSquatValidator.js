@@ -1,8 +1,9 @@
 import { useMemo } from 'react'
 
-const DEPTH_THRESHOLD = 165
-const TORSO_THRESHOLD = 60
+const SQUAT_DEPTH_THRESHOLD = 165
+const SQUAT_TORSO_THRESHOLD = 60
 const CURL_FLEX_THRESHOLD = 70
+const PRESS_EXTENSION_THRESHOLD = 160
 
 export function useSquatValidator({
   exerciseMode = 'squat',
@@ -18,7 +19,7 @@ export function useSquatValidator({
   enabled = false,
 }) {
   return useMemo(() => {
-    const isArmMode = exerciseMode === 'bicep' || exerciseMode === 'curl'
+    const isArmMode = exerciseMode === 'press' || exerciseMode === 'curl'
     const activeElbowAngle =
       exerciseMode === 'curl'
         ? curlArmSide === 'left'
@@ -77,8 +78,7 @@ export function useSquatValidator({
       }
 
       const deepEnough = activeElbowAngle <= CURL_FLEX_THRESHOLD
-      const torsoStable = torsoAngle == null ? true : torsoAngle <= TORSO_THRESHOLD
-      const isValid = deepEnough
+      const torsoStable = torsoAngle == null ? true : torsoAngle <= SQUAT_TORSO_THRESHOLD
 
       let feedback = `Curl detectado con el brazo ${armLabel}.`
 
@@ -91,7 +91,7 @@ export function useSquatValidator({
       return {
         ...baseValidation,
         isReady: true,
-        isValid,
+        isValid: deepEnough,
         deepEnough,
         torsoStable,
         hasRequiredView: true,
@@ -100,7 +100,7 @@ export function useSquatValidator({
       }
     }
 
-    if (isArmMode) {
+    if (exerciseMode === 'press') {
       if (elbowAngle == null) {
         return {
           ...baseValidation,
@@ -117,14 +117,13 @@ export function useSquatValidator({
         }
       }
 
-      const deepEnough = elbowAngle <= CURL_FLEX_THRESHOLD
-      const torsoStable = torsoAngle == null ? true : torsoAngle <= TORSO_THRESHOLD
-      const isValid = deepEnough
+      const deepEnough = elbowAngle >= PRESS_EXTENSION_THRESHOLD
+      const torsoStable = torsoAngle == null ? true : torsoAngle <= SQUAT_TORSO_THRESHOLD
 
       let feedback = 'Press militar detectado.'
 
       if (!deepEnough) {
-        feedback = 'Flexiona un poco mas el codo para completar el press militar.'
+        feedback = 'Extiende un poco mas los brazos para completar el press militar.'
       } else if (!torsoStable) {
         feedback = 'Mantén el torso mas estable y evita balancearte.'
       }
@@ -132,7 +131,7 @@ export function useSquatValidator({
       return {
         ...baseValidation,
         isReady: true,
-        isValid,
+        isValid: deepEnough,
         deepEnough,
         torsoStable,
         hasRequiredView: true,
@@ -149,18 +148,16 @@ export function useSquatValidator({
       }
     }
 
-    if (!hasRequiredView) {
-      if (bodyCoverage < 65) {
-        return {
-          ...baseValidation,
-          bodyCoverage,
-          feedback: `Aun falta un poco de cuerpo visible para validar bien la sentadilla (${bodyCoverage}%).`,
-        }
+    if (!hasRequiredView && bodyCoverage < 65) {
+      return {
+        ...baseValidation,
+        bodyCoverage,
+        feedback: `Aun falta un poco de cuerpo visible para validar bien la sentadilla (${bodyCoverage}%).`,
       }
     }
 
-    const deepEnough = kneeAngle <= DEPTH_THRESHOLD
-    const torsoStable = torsoAngle <= TORSO_THRESHOLD
+    const deepEnough = kneeAngle <= SQUAT_DEPTH_THRESHOLD
+    const torsoStable = torsoAngle <= SQUAT_TORSO_THRESHOLD
     const isValid = deepEnough && torsoStable
 
     let feedback = 'Sentadilla detectada.'

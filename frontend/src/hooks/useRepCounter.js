@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-const DOWN_THRESHOLD = 150
-const UP_THRESHOLD = 165
+const SQUAT_DOWN_THRESHOLD = 150
+const SQUAT_UP_THRESHOLD = 165
+const PRESS_EXTENSION_THRESHOLD = 160
+const PRESS_RESET_THRESHOLD = 120
 const CURL_FLEX_THRESHOLD = 70
-const CURL_EXTENDED_THRESHOLD = 150
+const CURL_RESET_THRESHOLD = 150
 const STABLE_FRAMES = 1
 
 function getOppositeArm(arm) {
@@ -13,7 +15,6 @@ function getOppositeArm(arm) {
 export function useRepCounter({
   exerciseMode = 'squat',
   kneeAngle,
-  torsoAngle,
   elbowAngle,
   leftElbowAngle,
   rightElbowAngle,
@@ -37,7 +38,12 @@ export function useRepCounter({
   const lastPlanRef = useRef(`${curlArmSide}:${curlRepsPerArm}`)
 
   const resetAll = useCallback(() => {
-    phaseRef.current = exerciseMode === 'curl' || exerciseMode === 'bicep' ? 'extended' : 'up'
+    phaseRef.current =
+      exerciseMode === 'press'
+        ? 'down'
+        : exerciseMode === 'curl'
+          ? 'extended'
+          : 'up'
     downFramesRef.current = 0
     upFramesRef.current = 0
     currentArmRef.current = curlArmSide
@@ -84,8 +90,6 @@ export function useRepCounter({
         downFramesRef.current = 0
 
         if (upFramesRef.current >= STABLE_FRAMES) {
-          let switchedArm = false
-
           if (phaseRef.current === 'extended') {
             const nextArmRepCount = armRepCountRef.current + 1
             armRepCountRef.current = nextArmRepCount
@@ -93,14 +97,13 @@ export function useRepCounter({
             setRepCount((count) => count + 1)
 
             if (nextArmRepCount >= curlRepsPerArm) {
-              const nextArm = getOppositeArm(currentArmRef.current)
               if (currentArmRef.current === curlArmSide) {
+                const nextArm = getOppositeArm(currentArmRef.current)
                 currentArmRef.current = nextArm
                 armRepCountRef.current = 0
                 phaseRef.current = 'extended'
                 setCurrentArm(nextArm)
                 setArmRepCount(0)
-                switchedArm = true
               } else {
                 isCompleteRef.current = true
                 setIsComplete(true)
@@ -108,7 +111,7 @@ export function useRepCounter({
             }
           }
 
-          if (!switchedArm && !isCompleteRef.current) {
+          if (!isCompleteRef.current) {
             phaseRef.current = 'flexed'
           }
         }
@@ -116,7 +119,7 @@ export function useRepCounter({
         return
       }
 
-      if (selectedElbowAngle >= CURL_EXTENDED_THRESHOLD) {
+      if (selectedElbowAngle >= CURL_RESET_THRESHOLD) {
         downFramesRef.current += 1
         upFramesRef.current = 0
 
@@ -132,34 +135,34 @@ export function useRepCounter({
       return
     }
 
-    if (exerciseMode === 'bicep') {
+    if (exerciseMode === 'press') {
       if (elbowAngle == null) {
         downFramesRef.current = 0
         upFramesRef.current = 0
         return
       }
 
-      if (elbowAngle <= 70) {
+      if (elbowAngle >= PRESS_EXTENSION_THRESHOLD) {
         upFramesRef.current += 1
         downFramesRef.current = 0
 
         if (upFramesRef.current >= STABLE_FRAMES) {
-          if (phaseRef.current === 'extended') {
-            queueMicrotask(() => setRepCount((count) => count + 1))
+          if (phaseRef.current === 'down' && isValid) {
+            setRepCount((count) => count + 1)
           }
 
-          phaseRef.current = 'flexed'
+          phaseRef.current = 'up'
         }
 
         return
       }
 
-      if (elbowAngle >= 150) {
+      if (elbowAngle <= PRESS_RESET_THRESHOLD) {
         downFramesRef.current += 1
         upFramesRef.current = 0
 
         if (downFramesRef.current >= STABLE_FRAMES) {
-          phaseRef.current = 'extended'
+          phaseRef.current = 'down'
         }
 
         return
@@ -176,13 +179,13 @@ export function useRepCounter({
       return
     }
 
-    if (kneeAngle <= DOWN_THRESHOLD) {
+    if (kneeAngle <= SQUAT_DOWN_THRESHOLD) {
       downFramesRef.current += 1
       upFramesRef.current = 0
 
       if (downFramesRef.current >= STABLE_FRAMES) {
-        if (phaseRef.current === 'up') {
-          queueMicrotask(() => setRepCount((count) => count + 1))
+        if (phaseRef.current === 'up' && isValid) {
+          setRepCount((count) => count + 1)
         }
 
         phaseRef.current = 'down'
@@ -191,7 +194,7 @@ export function useRepCounter({
       return
     }
 
-    if (kneeAngle >= UP_THRESHOLD) {
+    if (kneeAngle >= SQUAT_UP_THRESHOLD) {
       upFramesRef.current += 1
       downFramesRef.current = 0
 
@@ -204,7 +207,7 @@ export function useRepCounter({
 
     downFramesRef.current = 0
     upFramesRef.current = 0
-  }, [enabled, exerciseMode, hasPose, isValid, kneeAngle, torsoAngle, elbowAngle, leftElbowAngle, rightElbowAngle, curlArmSide, curlRepsPerArm, resetAll])
+  }, [enabled, exerciseMode, hasPose, isValid, kneeAngle, elbowAngle, leftElbowAngle, rightElbowAngle, curlArmSide, curlRepsPerArm, resetAll])
 
   return {
     repCount,

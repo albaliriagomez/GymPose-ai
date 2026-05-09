@@ -18,7 +18,7 @@ export function useLivePose({
   const lastVideoTimeRef = useRef(-1)
   const lastUiUpdateRef = useRef(0)
 
-  const isArmMode = exerciseMode === 'bicep' || exerciseMode === 'curl'
+  const isArmMode = exerciseMode === 'press' || exerciseMode === 'curl'
 
   const [status, setStatus] = useState('loading')
   const [error, setError] = useState('')
@@ -40,8 +40,8 @@ export function useLivePose({
     isComplete: false,
     feedback: exerciseMode === 'curl'
       ? 'Inicializando detector de bíceps'
-      : exerciseMode === 'bicep'
-        ? 'Inicializando detector de hombros'
+      : exerciseMode === 'press'
+        ? 'Inicializando detector de press militar'
         : 'Inicializando detector de pose',
   })
 

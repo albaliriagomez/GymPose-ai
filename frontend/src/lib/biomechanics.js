@@ -64,7 +64,7 @@ function getExerciseConfig(exerciseMode) {
     }
   }
 
-  if (exerciseMode === 'bicep') {
+  if (exerciseMode === 'press') {
     return {
       requiredLandmarks: ARM_REQUIRED_LANDMARKS,
       requiredView: 'arm',
@@ -158,11 +158,13 @@ export function buildPoseInsights(poseLandmarkerResult, exerciseMode = 'squat') 
     } else if (torsoAngle && torsoAngle > 18) {
       feedback = 'Torso inclinado. Trata de no balancear el cuerpo.'
     }
-  } else if (exerciseMode === 'bicep') {
-    if (elbowAngle && elbowAngle < 70) {
-      feedback = 'Press profundo. Mantén los codos alineados.'
+  } else if (exerciseMode === 'press') {
+    if (elbowAngle && elbowAngle > 165) {
+      feedback = 'Press completo. Mantén los brazos estables arriba.'
     } else if (torsoAngle && torsoAngle > 18) {
       feedback = 'Torso inclinado. Trata de no balancear el cuerpo.'
+    } else {
+      feedback = 'Empuja la barra o peso por encima de la cabeza.'
     }
   } else {
     if (kneeAngle && kneeAngle < 80) {

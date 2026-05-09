@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Header
 from sqlalchemy.orm import Session
 from sqlalchemy import func, cast, Date
 from datetime import datetime, timedelta
+from typing import Optional
 from database import get_db
 from models import User, Session as GymSession, Repetition
 from routers.auth import get_current_user
@@ -9,8 +10,12 @@ from routers.auth import get_current_user
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
 @router.get("/stats")
-def get_dashboard_stats(token: str, db: Session = Depends(get_db)):
-    user = get_current_user(token, db)
+def get_dashboard_stats(
+    token: Optional[str] = None,
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    user = get_current_user(token=token, authorization=authorization, db=db)
     today = datetime.utcnow().date()
 
     # Sesiones de hoy
@@ -56,8 +61,12 @@ def get_dashboard_stats(token: str, db: Session = Depends(get_db)):
 
 
 @router.get("/weekly")
-def get_weekly_summary(token: str, db: Session = Depends(get_db)):
-    user = get_current_user(token, db)
+def get_weekly_summary(
+    token: Optional[str] = None,
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    user = get_current_user(token=token, authorization=authorization, db=db)
     today = datetime.utcnow().date()
     week_start = today - timedelta(days=6)
 
@@ -93,8 +102,12 @@ def get_weekly_summary(token: str, db: Session = Depends(get_db)):
 
 
 @router.get("/last-analysis")
-def get_last_analysis(token: str, db: Session = Depends(get_db)):
-    user = get_current_user(token, db)
+def get_last_analysis(
+    token: Optional[str] = None,
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    user = get_current_user(token=token, authorization=authorization, db=db)
 
     last_rep = (
         db.query(Repetition)
@@ -116,8 +129,12 @@ def get_last_analysis(token: str, db: Session = Depends(get_db)):
 from models import Notification
 
 @router.get("/tips")
-def get_dashboard_tips(token: str, db: Session = Depends(get_db)):
-    user = get_current_user(token, db)
+def get_dashboard_tips(
+    token: Optional[str] = None,
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    user = get_current_user(token=token, authorization=authorization, db=db)
 
     consejo = (
         db.query(Notification)

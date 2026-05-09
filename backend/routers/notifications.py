@@ -1,5 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Header
 from sqlalchemy.orm import Session
+from typing import Optional
 from database import get_db
 from models import Notification, User
 from schemas.notifications import NotificationOut
@@ -10,10 +11,11 @@ router = APIRouter(prefix="/notifications", tags=["notifications"])
 
 @router.get("/", response_model=List[NotificationOut])
 def get_notifications(
-    token: str,
+    token: Optional[str] = None,
+    authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db)
 ):
-    current_user = get_current_user(token, db)
+    current_user = get_current_user(token=token, authorization=authorization, db=db)
     return (
         db.query(Notification)
         .filter(Notification.user_id == current_user.id)
@@ -23,10 +25,11 @@ def get_notifications(
 
 @router.get("/unread-count")
 def get_unread_count(
-    token: str,
+    token: Optional[str] = None,
+    authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db)
 ):
-    current_user = get_current_user(token, db)
+    current_user = get_current_user(token=token, authorization=authorization, db=db)
     count = (
         db.query(Notification)
         .filter(Notification.user_id == current_user.id, Notification.read == False)
@@ -37,10 +40,11 @@ def get_unread_count(
 @router.patch("/{notification_id}/read")
 def mark_as_read(
     notification_id: int,
-    token: str,
+    token: Optional[str] = None,
+    authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db)
 ):
-    current_user = get_current_user(token, db)
+    current_user = get_current_user(token=token, authorization=authorization, db=db)
     notif = db.query(Notification).filter(
         Notification.id == notification_id,
         Notification.user_id == current_user.id
@@ -53,10 +57,11 @@ def mark_as_read(
 
 @router.patch("/read-all")
 def mark_all_read(
-    token: str,
+    token: Optional[str] = None,
+    authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db)
 ):
-    current_user = get_current_user(token, db)
+    current_user = get_current_user(token=token, authorization=authorization, db=db)
     db.query(Notification).filter(
         Notification.user_id == current_user.id,
         Notification.read == False

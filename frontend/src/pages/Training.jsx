@@ -12,10 +12,10 @@ const EXERCISE_OPTIONS = {
     description: 'Piernas, cadera y torso',
     repLabel: 'sentadilla',
   },
-  bicep: {
-    label: 'Hombros',
-    shortLabel: 'Hombros',
-    description: 'Press militar y control del torso',
+  press: {
+    label: 'Press militar',
+    shortLabel: 'Press',
+    description: 'Hombros, codos y control del torso',
     repLabel: 'press militar',
   },
   curl: {
@@ -104,19 +104,19 @@ export default function Training() {
     queueMicrotask(() => {
       setNotice({
         tone: squatValidation?.isValid ? 'success' : 'info',
-        title:
-          exerciseMode === 'curl'
-            ? !squatValidation?.hasRequiredView
-              ? 'Bíceps incompletos'
-              : squatValidation?.isValid
-                ? 'Curl detectado'
-                : 'Aviso de bíceps'
-            : !squatValidation?.hasRequiredView
-              ? exerciseMode === 'bicep'
-                ? 'Hombros incompletos'
+          title:
+            exerciseMode === 'curl'
+              ? !squatValidation?.hasRequiredView
+                ? 'Bíceps incompletos'
+                : squatValidation?.isValid
+                  ? 'Curl detectado'
+                  : 'Aviso de bíceps'
+              : !squatValidation?.hasRequiredView
+              ? exerciseMode === 'press'
+                ? 'Press incompleto'
                 : 'Cuerpo incompleto'
               : squatValidation?.isValid
-                ? exerciseMode === 'bicep'
+                ? exerciseMode === 'press'
                   ? 'Press detectado'
                   : 'Sentadilla detectada'
                 : 'Aviso postural',
@@ -298,7 +298,7 @@ export default function Training() {
                         notice?.tone === 'success' ? 'bg-emerald-300' : 'bg-cyan-300 animate-pulse'
                       }`}
                     />
-                    <p className="text-sm leading-6 text-white">
+                        <p className="text-sm leading-6 text-white">
                       {notice?.message || squatValidation?.feedback || insights.feedback || 'Esperando datos de la camara.'}
                     </p>
                   </div>

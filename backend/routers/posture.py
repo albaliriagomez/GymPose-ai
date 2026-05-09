@@ -1,7 +1,8 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException, status, Depends
+from fastapi import APIRouter, UploadFile, File, HTTPException, status, Depends, Header
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from datetime import datetime
+from typing import Optional
 
 from database import get_db
 from models import User, Session as GymSession, Repetition
@@ -14,7 +15,8 @@ router = APIRouter(prefix="/posture", tags=["posture"])
 
 @router.post("/analyze", response_model=PostureAnalysisResponse)
 async def analyze_posture(
-    token: str,
+    token: Optional[str] = None,
+    authorization: Optional[str] = Header(None),
     file: UploadFile = File(...),
     db: Session = Depends(get_db)
 ):
@@ -42,7 +44,7 @@ async def analyze_posture(
 
     if result.success:
         try:
-            user = get_current_user(token, db)
+            user = get_current_user(token=token, authorization=authorization, db=db)
             now = datetime.utcnow()
 
             # Buscar sesión de hoy comparando solo la fecha (sin cast problemático)
