@@ -5,9 +5,11 @@ import './index.css'
 
 import { AuthProvider } from './context/AuthProvider.jsx'
 import ProtectedRoute from './components/ProtectedRoute'
+import Landing from './pages/Landing'
 import Login from './pages/Login'
 import Register from './pages/Register'
 import Dashboard from './pages/Dashboard'
+import TrainerDashboard from './pages/TrainerDashboard'
 import Progress from './pages/Progress'
 import Training from './pages/Training'
 import { Nutrition, Settings } from './pages/Placeholders'
@@ -25,10 +27,11 @@ createRoot(document.getElementById('root')).render(
     <AuthProvider>
       <BrowserRouter>
         <Routes>
-          <Route path="/" element={<Navigate to="/login" replace />} />
+          <Route path="/" element={<Landing />} />
           <Route path="/login" element={<Login />} /> 
           <Route path="/register"   element={<Register />} />
           <Route path="/dashboard"  element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+          <Route path="/trainer/dashboard"  element={<ProtectedRoute allowedRoles={['trainer']}><TrainerDashboard /></ProtectedRoute>} />
           <Route path="/progress"    element={<ProtectedRoute><Progress /></ProtectedRoute>} />
           <Route path="/training"   element={<ProtectedRoute><Training /></ProtectedRoute>} />
           <Route path="/posture"    element={<ProtectedRoute><Posture /></ProtectedRoute>} />

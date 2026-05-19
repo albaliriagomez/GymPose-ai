@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback } from 'react'
 import * as authService from '../services/authService'
 import { AuthContext } from './authContext'
 
+const withDefaultRole = (userData) => userData ? { ...userData, role: userData.role || 'user' } : null
+
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null)
   const [token, setToken] = useState(null)
@@ -14,7 +16,7 @@ export const AuthProvider = ({ children }) => {
 
     if (savedToken && savedUser) {
       setToken(savedToken)
-      setUser(savedUser)
+      setUser(withDefaultRole(savedUser))
     }
 
     setLoading(false)
@@ -27,7 +29,7 @@ export const AuthProvider = ({ children }) => {
     try {
       const response = await authService.register(userData)
       setToken(response.access_token)
-      setUser(response.user)
+      setUser(withDefaultRole(response.user))
       return response
     } catch (err) {
       setError(err.message)
@@ -44,7 +46,7 @@ export const AuthProvider = ({ children }) => {
     try {
       const response = await authService.login(email, password)
       setToken(response.access_token)
-      setUser(response.user)
+      setUser(withDefaultRole(response.user))
       return response
     } catch (err) {
       setError(err.message)
@@ -71,7 +73,7 @@ export const AuthProvider = ({ children }) => {
 
     try {
       const updatedUser = await authService.updateProfile(updateData, token)
-      setUser(updatedUser)
+      setUser(withDefaultRole(updatedUser))
       return updatedUser
     } catch (err) {
       setError(err.message)
@@ -88,7 +90,7 @@ export const AuthProvider = ({ children }) => {
 
     try {
       const updatedUser = await authService.fetchUserProfile(token)
-      setUser(updatedUser)
+      setUser(withDefaultRole(updatedUser))
     } catch (err) {
       setError(err.message)
       if (err.response?.status === 401) {

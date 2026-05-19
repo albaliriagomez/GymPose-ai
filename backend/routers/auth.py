@@ -67,6 +67,7 @@ def register(request: RegisterRequest, db: Session = Depends(get_db)):
         name=request.name,
         email=request.email,
         password_hash=hashed_password,
+        role=request.role or "user",
         weight_kg=request.weight_kg,
         height_cm=request.height_cm,
         goal=request.goal

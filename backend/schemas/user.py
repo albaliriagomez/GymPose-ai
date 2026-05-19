@@ -1,10 +1,11 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, field_validator
 from typing import Optional
 
 class UserOut(BaseModel):
     id: str
     name: str
     email: str
+    role: str = "user"
     weight_kg: Optional[float] = None
     height_cm: Optional[float] = None
     goal: Optional[str] = None
@@ -13,6 +14,11 @@ class UserOut(BaseModel):
     nivel_actividad: Optional[str] = None
     preferencia_alimentaria: Optional[str] = None
     alergias: Optional[str] = None
+
+    @field_validator("role", mode="before")
+    @classmethod
+    def default_role(cls, value):
+        return value or "user"
 
     class Config:
         from_attributes = True

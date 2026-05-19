@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, Float, DateTime, ForeignKey, Integer, Boolean
+from sqlalchemy import CheckConstraint, Column, String, Float, DateTime, ForeignKey, Integer, Boolean
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from database import Base
@@ -8,10 +8,14 @@ from sqlalchemy import Boolean
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = (
+        CheckConstraint("role IN ('user', 'trainer')", name="ck_users_role_valid"),
+    )
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String, nullable=False)
     email = Column(String, unique=True, index=True, nullable=False)
     password_hash = Column(String, nullable=False) # Guardaremos el hash
+    role = Column(String, nullable=False, default="user")
     
     # Campos que pide el perfil pero pueden ser nulos al registrarse
     weight_kg = Column(Float, nullable=True)
