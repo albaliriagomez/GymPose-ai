@@ -7,6 +7,8 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 })
 
+const normalizeUser = (user) => user ? { ...user, role: user.role || 'user' } : user
+
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('gympose_token')
   if (token) config.headers.Authorization = `Bearer ${token}`
@@ -28,6 +30,7 @@ api.interceptors.response.use(
 export const register = async (userData) => {
   try {
     const { data } = await api.post('/auth/register', userData)
+    data.user = normalizeUser(data.user)
     localStorage.setItem('gympose_token', data.access_token)
     localStorage.setItem('gympose_user', JSON.stringify(data.user))
     return data
@@ -40,6 +43,7 @@ export const register = async (userData) => {
 export const login = async (email, password) => {
   try {
     const { data } = await api.post('/auth/login', { email, password })
+    data.user = normalizeUser(data.user)
     localStorage.setItem('gympose_token', data.access_token)
     localStorage.setItem('gympose_user', JSON.stringify(data.user))
     return data
@@ -66,7 +70,7 @@ export const fetchUserProfile = async (token) => {
     const { data } = await api.get('/auth/me', {
       headers: { Authorization: `Bearer ${token}` }
     })
-    return data
+    return normalizeUser(data)
   } catch (err) {
     throw new Error(err.response?.data?.detail || 'Error al obtener perfil')
   }
@@ -77,8 +81,9 @@ export const updateProfile = async (updateData, token) => {
     const { data } = await api.put('/auth/me', updateData, {
       headers: { Authorization: `Bearer ${token}` }
     })
-    localStorage.setItem('gympose_user', JSON.stringify(data))
-    return data
+    const normalized = normalizeUser(data)
+    localStorage.setItem('gympose_user', JSON.stringify(normalized))
+    return normalized
   } catch (err) {
     throw new Error(err.response?.data?.detail || 'Error al actualizar perfil')
   }
@@ -91,7 +96,7 @@ export const logout = () => {
 
 export const getUser = () => {
   const user = localStorage.getItem('gympose_user')
-  return user ? JSON.parse(user) : null
+  return user ? normalizeUser(JSON.parse(user)) : null
 }
 
 export const getToken = () => {

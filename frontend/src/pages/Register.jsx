@@ -5,7 +5,7 @@ import { register } from '../services/authService'
 export default function Register() {
   const navigate = useNavigate()
   const [form, setForm] = useState({
-    name: '', email: '', password: '', confirm: '', weight_kg: '', height_cm: ''
+    name: '', email: '', password: '', confirm: '', weight_kg: '', height_cm: '', role: 'user'
   })
   const [errors, setErrors]           = useState({})
   const [serverError, setServerError] = useState('')
@@ -32,6 +32,7 @@ export default function Register() {
         name: form.name,
         email: form.email,
         password: form.password,
+        role: form.role,
         weight_kg: form.weight_kg ? Number(form.weight_kg) : null,
         height_cm: form.height_cm ? Number(form.height_cm) : null,
       })
@@ -88,6 +89,33 @@ export default function Register() {
             {field('email',    'Email',               'text',     'tu@email.com')}
             {field('password', 'Contraseña',          'password', '••••••••')}
             {field('confirm',  'Confirmar contraseña','password', '••••••••')}
+
+            <div>
+              <label className="block text-xs font-mono text-gym-muted mb-1.5">Tipo de cuenta</label>
+              <div className="grid grid-cols-2 gap-3">
+                {[
+                  { value: 'user', label: 'Usuario', icon: '👤' },
+                  { value: 'trainer', label: 'Entrenador', icon: '🏋️' },
+                ].map(option => {
+                  const selected = form.role === option.value
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => setForm({ ...form, role: option.value })}
+                      className={`rounded-xl border px-3 py-3 text-left transition-all ${
+                        selected
+                          ? 'border-gym-cyan bg-gym-cyan/10 text-white shadow-[0_0_18px_rgba(0,229,255,0.12)]'
+                          : 'border-gym-border bg-gym-accent text-gym-muted hover:border-gym-muted hover:text-white'
+                      }`}
+                    >
+                      <span className="block text-xl mb-1" aria-hidden="true">{option.icon}</span>
+                      <span className="font-display text-sm font-bold">{option.label}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
 
             <div className="grid grid-cols-2 gap-3">
               <div>

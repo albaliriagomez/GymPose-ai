@@ -24,8 +24,9 @@ export default function Login() {
     if (Object.keys(errs).length) { setErrors(errs); return }
     setErrors({}); setServerError(''); setLoading(true)
     try {
-      await login(form.email, form.password)
-      navigate('/dashboard')
+      const response = await login(form.email, form.password)
+      const role = response.user?.role || 'user'
+      navigate(role === 'trainer' ? '/trainer/dashboard' : '/dashboard')
     } catch (err) {
       setServerError(err.message)
     } finally { setLoading(false) }
