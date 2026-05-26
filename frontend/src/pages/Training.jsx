@@ -4,6 +4,7 @@ import PoseViewport from '../components/training/PoseViewport'
 import TrainingSessionHeader from '../components/training/TrainingSessionHeader'
 import { useCameraStream } from '../hooks/useCameraStream'
 import { useLivePose } from '../hooks/useLivePose'
+import { saveTrainingSession } from '../services/sessionService'
 
 const EXERCISE_OPTIONS = {
   squat: {
@@ -37,12 +38,14 @@ export default function Training() {
   const lastFeedbackRef = useRef('')
   const lastRepCountRef = useRef(0)
   const lastCompletionRef = useRef(false)
+  const sessionStartRef = useRef(null)
 
   const [isSessionLive, setIsSessionLive] = useState(false)
   const [notice, setNotice] = useState(null)
   const [exerciseMode, setExerciseMode] = useState('squat')
   const [curlStartArm, setCurlStartArm] = useState('left')
   const [curlRepsPerArm, setCurlRepsPerArm] = useState(10)
+  const [savedReps, setSavedReps] = useState(0)
 
   const {
     status: cameraStatus,
@@ -73,10 +76,13 @@ export default function Training() {
     if (isSessionLive) {
       setIsSessionLive(false)
       stopCamera()
+      sessionStartRef.current = null
       return
     }
-
     const started = await startCamera()
+    if (started) {
+      sessionStartRef.current = Date.now()
+    }
     setIsSessionLive(started)
   }
 
@@ -89,58 +95,75 @@ export default function Training() {
     hasPose: insights.hasPose,
   })
 
+  // Reset al cambiar ejercicio
   useEffect(() => {
     lastFeedbackRef.current = ''
     lastRepCountRef.current = 0
     lastCompletionRef.current = false
+    setSavedReps(0)
     queueMicrotask(() => setNotice(null))
   }, [exerciseMode, curlStartArm, curlRepsPerArm])
 
+  // Feedback postural
   useEffect(() => {
     const feedback = squatValidation?.feedback || insights.feedback || ''
     if (!feedback || feedback === lastFeedbackRef.current) return
-
     lastFeedbackRef.current = feedback
     queueMicrotask(() => {
       setNotice({
         tone: squatValidation?.isValid ? 'success' : 'info',
-          title:
-            exerciseMode === 'curl'
-              ? !squatValidation?.hasRequiredView
-                ? 'Bíceps incompletos'
-                : squatValidation?.isValid
-                  ? 'Curl detectado'
-                  : 'Aviso de bíceps'
-              : !squatValidation?.hasRequiredView
-              ? exerciseMode === 'press'
-                ? 'Press incompleto'
-                : 'Cuerpo incompleto'
+        title:
+          exerciseMode === 'curl'
+            ? !squatValidation?.hasRequiredView
+              ? 'Bíceps incompletos'
               : squatValidation?.isValid
-                ? exerciseMode === 'press'
-                  ? 'Press detectado'
-                  : 'Sentadilla detectada'
-                : 'Aviso postural',
+                ? 'Curl detectado'
+                : 'Aviso de bíceps'
+            : !squatValidation?.hasRequiredView
+            ? exerciseMode === 'press'
+              ? 'Press incompleto'
+              : 'Cuerpo incompleto'
+            : squatValidation?.isValid
+              ? exerciseMode === 'press'
+                ? 'Press detectado'
+                : 'Sentadilla detectada'
+              : 'Aviso postural',
         message: feedback,
       })
     })
   }, [exerciseMode, insights.feedback, squatValidation?.feedback, squatValidation?.hasRequiredView, squatValidation?.isValid])
 
+  // Guardar repetición en BD cuando sube el contador
   useEffect(() => {
     if (repCount <= lastRepCountRef.current) return
-
     lastRepCountRef.current = repCount
+
+    const exerciseLabel = EXERCISE_OPTIONS[exerciseMode]?.label || exerciseMode
+    const score = squatValidation?.isValid ? 95.0 : 75.0
+    const duration = sessionStartRef.current
+      ? Math.round((Date.now() - sessionStartRef.current) / 1000)
+      : 30
+
+    saveTrainingSession({
+      exercise: exerciseLabel,
+      score,
+      duration_seconds: duration,
+    }).then(() => {
+      setSavedReps(prev => prev + 1)
+    })
+
     queueMicrotask(() => {
       setNotice({
         tone: 'success',
-        title: 'Repeticion contabilizada',
+        title: 'Repetición contabilizada',
         message: `Llevas ${repCount} repeticiones de ${EXERCISE_OPTIONS[exerciseMode].repLabel}.`,
       })
     })
-  }, [exerciseMode, repCount])
+  }, [exerciseMode, repCount, squatValidation?.isValid])
 
+  // Completar serie de curl
   useEffect(() => {
     if (exerciseMode !== 'curl' || !repPlan?.isComplete || lastCompletionRef.current) return
-
     lastCompletionRef.current = true
     queueMicrotask(() => {
       setNotice({
@@ -154,6 +177,8 @@ export default function Training() {
   return (
     <DashboardLayout>
       <div className="mx-auto max-w-6xl space-y-6">
+
+        {/* Selector de ejercicio */}
         <div className="rounded-3xl border border-gym-border bg-gym-sidebar p-4">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
@@ -164,7 +189,6 @@ export default function Training() {
                 Modo de entrenamiento
               </h2>
             </div>
-
             <div className="flex flex-wrap gap-2">
               {Object.entries(EXERCISE_OPTIONS).map(([mode, config]) => {
                 const active = exerciseMode === mode
@@ -210,6 +234,8 @@ export default function Training() {
           <aside className="xl:sticky xl:top-6">
             <section className="rounded-2xl border border-gym-border bg-gym-sidebar px-5 py-4">
               <div className="flex flex-col gap-4">
+
+                {/* Contador de repeticiones */}
                 <div className="rounded-2xl border border-gym-border bg-gym-accent px-4 py-4 text-center">
                   <p className="text-[10px] font-mono uppercase tracking-[0.2em] text-gym-muted">
                     Repeticiones
@@ -217,14 +243,19 @@ export default function Training() {
                   <p className="mt-2 font-display text-5xl font-bold leading-none text-white">
                     {repCount}
                   </p>
+                  {savedReps > 0 && (
+                    <p className="mt-1 text-[10px] font-mono text-gym-green">
+                      ✓ {savedReps} guardadas en tu historial
+                    </p>
+                  )}
                 </div>
 
+                {/* Plan de bíceps */}
                 {exerciseMode === 'curl' && (
                   <div className="rounded-2xl border border-gym-border bg-gym-accent px-4 py-4">
                     <p className="text-[10px] font-mono uppercase tracking-[0.2em] text-gym-muted">
                       Plan de bíceps
                     </p>
-
                     <div className="mt-3 grid gap-3">
                       <label className="space-y-1">
                         <span className="block text-[10px] font-mono uppercase tracking-[0.18em] text-gym-muted">
@@ -239,7 +270,6 @@ export default function Training() {
                           <option value="right">Derecho</option>
                         </select>
                       </label>
-
                       <label className="space-y-1">
                         <span className="block text-[10px] font-mono uppercase tracking-[0.18em] text-gym-muted">
                           Reps por brazo
@@ -253,7 +283,6 @@ export default function Training() {
                           className="w-full rounded-xl border border-gym-border bg-gym-sidebar px-3 py-2 text-sm text-white outline-none"
                         />
                       </label>
-
                       <p className="text-sm leading-6 text-white">
                         Haz {curlRepsPerArm} con el {ARM_LABELS[curlStartArm]} y luego {curlRepsPerArm} con el otro brazo.
                       </p>
@@ -261,25 +290,21 @@ export default function Training() {
                   </div>
                 )}
 
+                {/* Progreso curl */}
                 {exerciseMode === 'curl' && (
                   <div className="rounded-2xl border border-cyan-400/30 bg-slate-950/88 px-4 py-4">
                     <p className="text-[10px] font-mono uppercase tracking-[0.2em] text-gym-muted">
                       Progreso
                     </p>
                     <div className="mt-2 space-y-2 text-sm text-white">
-                      <p>
-                        Brazo actual: <span className="font-semibold">{ARM_LABELS[repPlan?.currentArm || curlStartArm]}</span>
-                      </p>
-                      <p>
-                        En este brazo: <span className="font-semibold">{repPlan?.armRepCount ?? 0}/{curlRepsPerArm}</span>
-                      </p>
-                      <p>
-                        Estado: <span className="font-semibold">{repPlan?.isComplete ? 'Serie completa' : 'En curso'}</span>
-                      </p>
+                      <p>Brazo actual: <span className="font-semibold">{ARM_LABELS[repPlan?.currentArm || curlStartArm]}</span></p>
+                      <p>En este brazo: <span className="font-semibold">{repPlan?.armRepCount ?? 0}/{curlRepsPerArm}</span></p>
+                      <p>Estado: <span className="font-semibold">{repPlan?.isComplete ? 'Serie completa ✓' : 'En curso'}</span></p>
                     </div>
                   </div>
                 )}
 
+                {/* Feedback */}
                 <div
                   className={`rounded-2xl border px-4 py-4 shadow-[0_20px_50px_rgba(0,0,0,0.28)] transition-all ${
                     notice?.tone === 'success'
@@ -293,16 +318,28 @@ export default function Training() {
                     {notice?.title || `Feedback ${EXERCISE_OPTIONS[exerciseMode].shortLabel.toLowerCase()}`}
                   </p>
                   <div className="mt-3 flex items-start gap-3">
-                    <div
-                      className={`mt-1 h-3 w-3 rounded-full ${
-                        notice?.tone === 'success' ? 'bg-emerald-300' : 'bg-cyan-300 animate-pulse'
-                      }`}
-                    />
-                        <p className="text-sm leading-6 text-white">
-                      {notice?.message || squatValidation?.feedback || insights.feedback || 'Esperando datos de la camara.'}
+                    <div className={`mt-1 h-3 w-3 rounded-full flex-shrink-0 ${
+                      notice?.tone === 'success' ? 'bg-emerald-300' : 'bg-cyan-300 animate-pulse'
+                    }`}/>
+                    <p className="text-sm leading-6 text-white">
+                      {notice?.message || squatValidation?.feedback || insights.feedback || 'Esperando datos de la cámara.'}
                     </p>
                   </div>
                 </div>
+
+                {/* Estado de sesión */}
+                {isSessionLive && (
+                  <div className="rounded-2xl border border-gym-green/20 bg-gym-green/5 px-4 py-3 text-center">
+                    <div className="flex items-center justify-center gap-2">
+                      <div className="w-2 h-2 rounded-full bg-gym-green animate-pulse"/>
+                      <p className="text-xs font-mono text-gym-green">SESIÓN ACTIVA</p>
+                    </div>
+                    <p className="text-gym-muted text-[10px] font-mono mt-1">
+                      Las repeticiones se guardan automáticamente
+                    </p>
+                  </div>
+                )}
+
               </div>
             </section>
           </aside>
@@ -312,29 +349,10 @@ export default function Training() {
   )
 }
 
-function getStatusMessage({
-  cameraError,
-  poseError,
-  cameraStatus,
-  poseStatus,
-  isSessionLive,
-  hasPose,
-}) {
-  if (cameraError || poseError) {
-    return cameraError || poseError
-  }
-
-  if (!isSessionLive) {
-    return 'Pulsa "Iniciar camara" para comenzar.'
-  }
-
-  if (cameraStatus === 'requesting' || poseStatus === 'loading') {
-    return 'Estamos preparando la camara.'
-  }
-
-  if (hasPose) {
-    return 'Te vemos bien en pantalla.'
-  }
-
-  return 'La camara esta encendida. Ponte frente a ella para comenzar.'
+function getStatusMessage({ cameraError, poseError, cameraStatus, poseStatus, isSessionLive, hasPose }) {
+  if (cameraError || poseError) return cameraError || poseError
+  if (!isSessionLive) return 'Pulsa "Iniciar cámara" para comenzar.'
+  if (cameraStatus === 'requesting' || poseStatus === 'loading') return 'Estamos preparando la cámara.'
+  if (hasPose) return 'Te vemos bien en pantalla.'
+  return 'La cámara está encendida. Ponte frente a ella para comenzar.'
 }
