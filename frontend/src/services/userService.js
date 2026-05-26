@@ -12,3 +12,8 @@ export const updateProfile = async (profileData) => {
   const { data } = await axios.put(`${BASE_URL}/auth/me`, profileData, { headers: headers() })
   return data
 }
+
+export const getTrainers = async () => {
+  const { data } = await axios.get(`${BASE_URL}/trainers`)
+  return data
+}

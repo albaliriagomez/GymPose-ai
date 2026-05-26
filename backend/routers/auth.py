@@ -149,6 +149,20 @@ def update_user_profile(
         user.preferencia_alimentaria = request.preferencia_alimentaria
     if request.alergias is not None:
         user.alergias = request.alergias
+    if "trainer_id" in request.model_fields_set:
+        if request.trainer_id is None:
+            user.trainer_id = None
+        else:
+            trainer = db.query(User).filter(
+                User.id == request.trainer_id,
+                User.role == "trainer",
+            ).first()
+            if not trainer:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Entrenador no encontrado"
+                )
+            user.trainer_id = request.trainer_id
     
     db.commit()
     db.refresh(user)
