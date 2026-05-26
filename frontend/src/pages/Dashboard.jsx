@@ -70,11 +70,16 @@ const Count = ({ to, suffix = '' }) => {
   return <>{n}{suffix}</>
 }
 
+const getMealMacro = (meal, key) => {
+  const legacyKey = `${key}_g`
+  return Number(meal.macros?.[key] ?? meal.macros?.[legacyKey] ?? meal[legacyKey] ?? 0)
+}
+
 // ── Tarjeta de comida ─────────────────────────────────────────────────────────
 const MealRow = ({ meal, onToggle }) => {
   const done  = meal.status === 'completed'
-  const prot  = Math.round(meal.macros?.proteina_g ?? meal.proteina_g ?? 0)
-  const carbs = Math.round(meal.macros?.carbos_g   ?? meal.carbos_g   ?? 0)
+  const prot  = Math.round(getMealMacro(meal, 'proteina'))
+  const carbs = Math.round(getMealMacro(meal, 'carbos'))
   const kcal  = Math.round(meal.kcal || 0)
   const hora  = meal.time || meal.hora || ''
 
@@ -274,9 +279,9 @@ export default function Dashboard() {
   const kcal_con  = Math.round(meals.filter(m => m.status === 'completed').reduce((a, m) => a + (m.kcal || 0), 0))
   const kcalPct   = Math.min(100, Math.round((kcal_con / obj_kcal) * 100))
   const done_c    = meals.filter(m => m.status === 'completed').length
-  const prot_c    = Math.round(meals.filter(m => m.status === 'completed').reduce((a, m) => a + (m.macros?.proteina_g ?? m.proteina_g ?? 0), 0))
-  const carbs_c   = Math.round(meals.filter(m => m.status === 'completed').reduce((a, m) => a + (m.macros?.carbos_g   ?? m.carbos_g   ?? 0), 0))
-  const grasas_c  = Math.round(meals.filter(m => m.status === 'completed').reduce((a, m) => a + (m.macros?.grasas_g  ?? m.grasas_g   ?? 0), 0))
+  const prot_c    = Math.round(meals.filter(m => m.status === 'completed').reduce((a, m) => a + getMealMacro(m, 'proteina'), 0))
+  const carbs_c   = Math.round(meals.filter(m => m.status === 'completed').reduce((a, m) => a + getMealMacro(m, 'carbos'), 0))
+  const grasas_c  = Math.round(meals.filter(m => m.status === 'completed').reduce((a, m) => a + getMealMacro(m, 'grasas'), 0))
   const prot_obj  = Math.round(obj_kcal * 0.30 / 4)
   const carbs_obj = Math.round(obj_kcal * 0.40 / 4)
   const gras_obj  = Math.round(obj_kcal * 0.30 / 9)
