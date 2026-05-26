@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from sqlalchemy import CheckConstraint, Column, String, Float, DateTime, ForeignKey, Integer, Boolean
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import backref, relationship
 from database import Base
 from sqlalchemy import Boolean 
 
@@ -16,6 +16,7 @@ class User(Base):
     email = Column(String, unique=True, index=True, nullable=False)
     password_hash = Column(String, nullable=False) # Guardaremos el hash
     role = Column(String, nullable=False, default="user")
+    trainer_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
     
     # Campos que pide el perfil pero pueden ser nulos al registrarse
     weight_kg = Column(Float, nullable=True)
@@ -30,6 +31,7 @@ class User(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     
     # Relaciones
+    trainer = relationship("User", remote_side=[id], backref=backref("clients"))
     sessions = relationship("Session", back_populates="user")
     # Dejamos lista la relación para la tarea de Nutrición
     nutritions = relationship("Nutrition", back_populates="user")

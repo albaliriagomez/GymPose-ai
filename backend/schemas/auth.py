@@ -48,6 +48,7 @@ class UpdateProfileRequest(BaseModel):
     nivel_actividad: Optional[str] = None
     preferencia_alimentaria: Optional[str] = None
     alergias: Optional[str] = None
+    trainer_id: Optional[UUID] = None
 
     class Config:
         json_schema_extra = {
@@ -65,6 +66,7 @@ class UserResponse(BaseModel):
     name: str
     email: str
     role: str = "user"
+    trainer_id: Optional[UUID] = None
     weight_kg: Optional[float] = None
     height_cm: Optional[float] = None
     goal: Optional[str] = None

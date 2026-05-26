@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import DashboardLayout from "../components/DashboardLayout";
-import { getProfile, updateProfile } from "../services/userService";
+import { getProfile, getTrainers, updateProfile } from "../services/userService";
 
 const goalOptions = [
   { value: "Perder grasa corporal", color: "text-gym-yellow", desc: "Reducir % de grasa y definir" },
@@ -16,6 +16,9 @@ export default function Profile() {
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [trainers, setTrainers] = useState([]);
+  const [showTrainerSelect, setShowTrainerSelect] = useState(false);
+  const [savingTrainer, setSavingTrainer] = useState(false);
 
   useEffect(() => {
     getProfile()
@@ -31,10 +34,39 @@ export default function Profile() {
           nivel_actividad: data.nivel_actividad || "",
           preferencia_alimentaria: data.preferencia_alimentaria || "",
           alergias: data.alergias || "",
+          trainer_id: data.trainer_id || "",
         });
+        return getTrainers().then(setTrainers).catch(() => setTrainers([]));
       })
       .catch((err) => console.error("ERROR:", err.response?.data || err.message));
   }, []);
+
+  const handleTrainerAction = async () => {
+    if (!trainers.length) {
+      try {
+        const data = await getTrainers();
+        setTrainers(data);
+      } catch (err) {
+        console.error("ERROR TRAINERS:", err.response?.data || err.message);
+      }
+    }
+    setShowTrainerSelect(true);
+  };
+
+  const handleTrainerChange = async (trainerId) => {
+    if (!trainerId) return;
+    setSavingTrainer(true);
+    try {
+      const updated = await updateProfile({ trainer_id: trainerId });
+      setUser(updated);
+      setForm({ ...form, trainer_id: updated.trainer_id || "" });
+      setShowTrainerSelect(false);
+      setSuccess(true);
+      setTimeout(() => setSuccess(false), 3000);
+    } finally {
+      setSavingTrainer(false);
+    }
+  };
 
   const validate = () => {
     const e = {};
@@ -84,6 +116,7 @@ export default function Profile() {
   }
 
   const currentGoal = goalOptions.find((g) => g.value === user.goal);
+  const currentTrainer = trainers.find((trainer) => trainer.id === user.trainer_id);
 
   return (
     <DashboardLayout>
@@ -205,6 +238,42 @@ export default function Profile() {
             <div>
               <label className="block text-xs font-mono text-gym-muted mb-1.5">Alergias o intolerancias</label>
               <input type="text" value={form.alergias} onChange={(e) => setForm({ ...form, alergias: e.target.value })} disabled={!editing} placeholder="Ej: nueces, mariscos, huevo..." className="w-full bg-gym-accent border border-gym-border rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-gym-cyan transition-colors disabled:opacity-50" />
+            </div>
+
+            <div className="border-t border-gym-border pt-5">
+              <div className="flex items-center justify-between gap-4 mb-3">
+                <div>
+                  <h4 className="font-display font-bold text-white text-base">Mi Entrenador</h4>
+                  <p className="text-sm text-gym-muted">
+                    {user.trainer_id
+                      ? (currentTrainer?.name || "Entrenador asignado")
+                      : "Sin entrenador asignado"}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleTrainerAction}
+                  className="text-xs font-mono text-gym-cyan border border-gym-cyan/30 bg-gym-cyan/10 px-3 py-1.5 rounded-lg hover:bg-gym-cyan/20 transition-all"
+                >
+                  {user.trainer_id ? "Cambiar" : "Seleccionar"}
+                </button>
+              </div>
+
+              {showTrainerSelect && (
+                <select
+                  value={form.trainer_id || ""}
+                  onChange={(e) => handleTrainerChange(e.target.value)}
+                  disabled={savingTrainer}
+                  className="w-full bg-gym-accent border border-gym-border rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-gym-cyan transition-colors disabled:opacity-50"
+                >
+                  <option value="">Seleccionar entrenador</option>
+                  {trainers.map((trainer) => (
+                    <option key={trainer.id} value={trainer.id}>
+                      {trainer.name} - {trainer.email}
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
           </div>
         </div>

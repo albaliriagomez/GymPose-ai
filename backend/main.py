@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.exc import OperationalError
 
 from models import User, Session, Repetition, Nutrition, Notification
-from routers import auth, posture, notifications, users, nutrition, dashboard, training 
+from routers import auth, posture, notifications, users, nutrition, dashboard, training, trainers 
 
 import init_db
 
@@ -34,6 +34,8 @@ app.include_router(notifications.router)
 app.include_router(users.router)
 app.include_router(dashboard.router)
 app.include_router(training.router)
+app.include_router(trainers.router)
+app.include_router(trainers.trainer_router)
 
 @app.get("/health")
 def health_check():

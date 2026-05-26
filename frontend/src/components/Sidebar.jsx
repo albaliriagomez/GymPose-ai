@@ -18,7 +18,7 @@ export default function Sidebar() {
   const navigate    = useNavigate()
 
   return (
-    <aside className="w-52 min-h-screen bg-gym-sidebar border-r border-gym-border flex flex-col py-6 px-3 flex-shrink-0">
+    <aside className="fixed left-0 top-0 z-20 h-screen w-52 overflow-y-auto bg-gym-sidebar border-r border-gym-border flex flex-col py-6 px-3 flex-shrink-0">
       {/* Logo */}
       <div className="px-3 mb-8">
         <div className="flex items-center gap-2">
