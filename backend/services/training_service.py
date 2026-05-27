@@ -16,9 +16,13 @@ Ejercicios detectables por MediaPipe en Training.jsx:
 """
 
 import os, json, re
+from datetime import datetime
 from typing import Optional
 from groq import Groq
+from fastapi import HTTPException, status
+from sqlalchemy.orm import Session
 from schemas.training import TrainingPlan, WorkoutDay, Exercise
+from models import User, TrainingPlanSelection, TrainingRoutineProgress, TrainingExerciseProgress
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  CONSTANTE: qué ejercicios detecta MediaPipe hoy
@@ -640,3 +644,565 @@ def build_plan(
     """Backward-compatible: devuelve solo la variante A."""
     result = build_plans(goal=goal, frequency=frequency, weight_kg=weight_kg, height_cm=height_cm)
     return result["variantes"]["A"]
+
+
+def _validate_variant(variant: str) -> str:
+    normalized = (variant or "").strip().upper()
+    if normalized not in {"A", "B", "C"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="plan_variant debe ser A, B o C",
+        )
+    return normalized
+
+
+def _validate_frequency(frequency: str) -> str:
+    normalized = (frequency or "").strip().lower()
+    if normalized not in {"baja", "media", "alta"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="frequency debe ser 'baja', 'media' o 'alta'",
+        )
+    return normalized
+
+
+def _plan_from_selection(selection: TrainingPlanSelection) -> TrainingPlan:
+    return TrainingPlan.model_validate(selection.plan_payload)
+
+
+def _routine_to_payload(routine: TrainingRoutineProgress) -> dict:
+    return {
+        "id": routine.id,
+        "day_number": routine.day_number,
+        "day_name": routine.day_name,
+        "status": routine.status,
+        "started_at": routine.started_at,
+        "completed_at": routine.completed_at,
+        "completed_exercises_count": routine.completed_exercises_count,
+        "total_exercises": routine.total_exercises,
+    }
+
+
+def _extract_reps_target_value(reps_target: str | None) -> Optional[int]:
+    if not reps_target:
+        return None
+    text = reps_target.strip().lower()
+    match = re.search(r"\d+", text)
+    if not match:
+        return None
+    return int(match.group(0))
+
+
+def _exercise_to_payload(exercise: TrainingExerciseProgress) -> dict:
+    current_set = exercise.sets_target if exercise.status == "completed" else min(exercise.sets_completed + 1, exercise.sets_target)
+    return {
+        "id": exercise.id,
+        "exercise_id": exercise.id,
+        "exercise_order": exercise.exercise_order,
+        "exercise_name": exercise.exercise_name,
+        "sets_target": exercise.sets_target,
+        "reps_target": exercise.reps_target,
+        "reps_target_value": exercise.reps_target_value,
+        "sets_completed": exercise.sets_completed,
+        "reps_completed_current_set": exercise.reps_completed_current_set,
+        "current_set": current_set,
+        "status": exercise.status,
+        "started_at": exercise.started_at,
+        "completed_at": exercise.completed_at,
+    }
+
+
+def _day_to_payload(
+    routine: TrainingRoutineProgress,
+    exercises: list[TrainingExerciseProgress],
+) -> dict:
+    current_exercise = _resolve_current_exercise(exercises)
+    completed_count = sum(1 for exercise in exercises if exercise.status == "completed")
+    return {
+        **_routine_to_payload(routine),
+        "day_id": routine.id,
+        "completed_exercises_count": completed_count,
+        "current_exercise": _exercise_to_payload(current_exercise) if current_exercise else None,
+        "exercises": [_exercise_to_payload(exercise) for exercise in exercises],
+    }
+
+
+def _get_day_routine(db: Session, selection_id: int, day_number: int) -> Optional[TrainingRoutineProgress]:
+    return (
+        db.query(TrainingRoutineProgress)
+        .filter(
+            TrainingRoutineProgress.training_plan_id == selection_id,
+            TrainingRoutineProgress.day_number == day_number,
+        )
+        .first()
+    )
+
+
+def _get_day_exercises(
+    db: Session,
+    selection_id: int,
+    day_number: int,
+) -> list[TrainingExerciseProgress]:
+    return (
+        db.query(TrainingExerciseProgress)
+        .filter(
+            TrainingExerciseProgress.training_plan_id == selection_id,
+            TrainingExerciseProgress.day_number == day_number,
+        )
+        .order_by(TrainingExerciseProgress.exercise_order.asc())
+        .all()
+    )
+
+
+def _resolve_current_exercise(
+    exercises: list[TrainingExerciseProgress],
+) -> Optional[TrainingExerciseProgress]:
+    for status_name in ("in_progress", "pending"):
+        for exercise in exercises:
+            if exercise.status == status_name:
+                return exercise
+    return exercises[-1] if exercises else None
+
+
+def _get_active_selection(db: Session, user_id) -> Optional[TrainingPlanSelection]:
+    return (
+        db.query(TrainingPlanSelection)
+        .filter(
+            TrainingPlanSelection.user_id == user_id,
+        )
+        .first()
+    )
+
+
+def _get_routines_for_selection(
+    db: Session,
+    selection_id: int,
+) -> list[TrainingRoutineProgress]:
+    return (
+        db.query(TrainingRoutineProgress)
+        .filter(TrainingRoutineProgress.training_plan_id == selection_id)
+        .order_by(TrainingRoutineProgress.day_number.asc())
+        .all()
+    )
+
+
+def _resolve_current_routine(routines: list[TrainingRoutineProgress]) -> Optional[TrainingRoutineProgress]:
+    for status_name in ("in_progress", "pending"):
+        for routine in routines:
+            if routine.status == status_name:
+                return routine
+    return routines[-1] if routines else None
+
+
+def select_training_plan(
+    db: Session,
+    user: User,
+    plan_variant: str,
+    frequency: str,
+) -> TrainingPlanSelection:
+    if not user.goal:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Debes configurar tu meta en el perfil antes de seleccionar un plan.",
+        )
+
+    normalized_variant = _validate_variant(plan_variant)
+    normalized_frequency = _validate_frequency(frequency)
+
+    plans = build_plans(
+        goal=user.goal,
+        frequency=normalized_frequency,
+        weight_kg=user.weight_kg,
+        height_cm=user.height_cm,
+        nivel_actividad=getattr(user, "nivel_actividad", None),
+        edad=getattr(user, "edad", None),
+        sexo=getattr(user, "sexo", None),
+    )
+
+    selected_plan = plans["variantes"][normalized_variant]
+    selection = _get_active_selection(db, user.id)
+
+    if selection is None:
+        selection = TrainingPlanSelection(
+            user_id=user.id,
+            plan_variant=normalized_variant,
+            frequency=normalized_frequency,
+            goal=user.goal,
+            plan_payload=selected_plan.model_dump(mode="json"),
+            is_active=True,
+            selected_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+        )
+        db.add(selection)
+        db.flush()
+    else:
+        db.query(TrainingExerciseProgress).filter(
+            TrainingExerciseProgress.training_plan_id == selection.id
+        ).delete(synchronize_session=False)
+        db.query(TrainingRoutineProgress).filter(
+            TrainingRoutineProgress.training_plan_id == selection.id
+        ).delete(synchronize_session=False)
+        selection.plan_variant = normalized_variant
+        selection.frequency = normalized_frequency
+        selection.goal = user.goal
+        selection.plan_payload = selected_plan.model_dump(mode="json")
+        selection.is_active = True
+        selection.selected_at = datetime.utcnow()
+        selection.updated_at = datetime.utcnow()
+
+    for day in selected_plan.days:
+        routine = TrainingRoutineProgress(
+            training_plan_id=selection.id,
+            user_id=user.id,
+            day_number=day.day_number,
+            day_name=day.day_name,
+            status="pending",
+            total_exercises=len(day.exercises),
+        )
+        db.add(routine)
+        db.flush()
+
+        for exercise_index, exercise in enumerate(day.exercises, start=1):
+            db.add(
+                TrainingExerciseProgress(
+                    training_plan_id=selection.id,
+                    training_routine_id=routine.id,
+                    user_id=user.id,
+                    day_number=day.day_number,
+                    exercise_order=exercise_index,
+                    exercise_name=exercise.name,
+                    sets_target=exercise.sets,
+                    reps_target=exercise.reps,
+                    reps_target_value=_extract_reps_target_value(exercise.reps),
+                    sets_completed=0,
+                    reps_completed_current_set=0,
+                    status="pending",
+                )
+            )
+
+    db.commit()
+    db.refresh(selection)
+    return selection
+
+
+def get_active_training_plan(db: Session, user: User) -> Optional[TrainingPlanSelection]:
+    selection = _get_active_selection(db, user.id)
+    if selection is None or not selection.is_active:
+        return None
+    return selection
+
+
+def build_current_plan_response(db: Session, user: User) -> dict:
+    selection = get_active_training_plan(db, user)
+    if selection is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No hay un plan activo seleccionado.",
+        )
+
+    routines = _get_routines_for_selection(db, selection.id)
+    current_routine = _resolve_current_routine(routines)
+    current_day_payload = None
+    if current_routine:
+        exercises = _get_day_exercises(db, selection.id, current_routine.day_number)
+        current_day_payload = _day_to_payload(current_routine, exercises)
+
+    return {
+        "plan": {
+            "id": selection.id,
+            "plan_variant": selection.plan_variant,
+            "frequency": selection.frequency,
+            "goal": selection.goal,
+            "is_active": selection.is_active,
+            "selected_at": selection.selected_at,
+            "updated_at": selection.updated_at,
+            "plan": _plan_from_selection(selection),
+        },
+        "current_day": current_day_payload,
+    }
+
+
+def build_routines_progress_response(db: Session, user: User) -> dict:
+    selection = get_active_training_plan(db, user)
+    if selection is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No hay un plan activo seleccionado.",
+        )
+
+    routines = _get_routines_for_selection(db, selection.id)
+    current_routine = _resolve_current_routine(routines)
+    routines_payload = []
+    for routine in routines:
+        exercises = _get_day_exercises(db, selection.id, routine.day_number)
+        routines_payload.append(_day_to_payload(routine, exercises))
+
+    return {
+        "plan_id": selection.id,
+        "plan_variant": selection.plan_variant,
+        "frequency": selection.frequency,
+        "routines": routines_payload,
+        "current_day": _day_to_payload(current_routine, _get_day_exercises(db, selection.id, current_routine.day_number)) if current_routine else None,
+    }
+
+
+def build_day_progress_response(db: Session, user: User, day_number: int) -> dict:
+    selection = get_active_training_plan(db, user)
+    if selection is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No hay un plan activo seleccionado.",
+        )
+
+    routine = _get_day_routine(db, selection.id, day_number)
+    if routine is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Rutina no encontrada para el día solicitado.",
+        )
+
+    exercises = _get_day_exercises(db, selection.id, day_number)
+    return _day_to_payload(routine, exercises)
+
+
+def start_routine_day(db: Session, user: User, day_number: int) -> TrainingRoutineProgress:
+    selection = get_active_training_plan(db, user)
+    if selection is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No hay un plan activo seleccionado.",
+        )
+
+    routine = (
+        db.query(TrainingRoutineProgress)
+        .filter(
+            TrainingRoutineProgress.training_plan_id == selection.id,
+            TrainingRoutineProgress.day_number == day_number,
+        )
+        .first()
+    )
+    if routine is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Rutina no encontrada para el día solicitado.",
+        )
+    if routine.status == "completed":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="La rutina ya fue completada.",
+        )
+    if routine.status != "in_progress":
+        routine.status = "in_progress"
+        routine.started_at = routine.started_at or datetime.utcnow()
+        routine.updated_at = datetime.utcnow()
+    exercises = _get_day_exercises(db, selection.id, day_number)
+    first_exercise = _resolve_current_exercise(exercises)
+    if first_exercise and first_exercise.status == "pending":
+        first_exercise.status = "in_progress"
+        first_exercise.started_at = first_exercise.started_at or datetime.utcnow()
+        first_exercise.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(routine)
+    return routine
+
+
+def _advance_to_next_exercise(
+    db: Session,
+    selection: TrainingPlanSelection,
+    day_number: int,
+) -> Optional[TrainingExerciseProgress]:
+    exercises = _get_day_exercises(db, selection.id, day_number)
+    next_exercise = None
+    found_current = False
+    for exercise in exercises:
+        if exercise.status == "in_progress":
+            found_current = True
+            continue
+        if found_current and exercise.status == "pending":
+            next_exercise = exercise
+            break
+    if next_exercise:
+        next_exercise.status = "in_progress"
+        next_exercise.started_at = next_exercise.started_at or datetime.utcnow()
+        next_exercise.updated_at = datetime.utcnow()
+        db.flush()
+    return next_exercise
+
+
+def _finalize_day_if_needed(
+    db: Session,
+    routine: TrainingRoutineProgress,
+    exercises: list[TrainingExerciseProgress],
+) -> None:
+    if exercises and all(exercise.status == "completed" for exercise in exercises):
+        routine.status = "completed"
+        routine.completed_at = routine.completed_at or datetime.utcnow()
+        routine.completed_exercises_count = len(exercises)
+        routine.total_exercises = len(exercises)
+        routine.updated_at = datetime.utcnow()
+
+
+def add_reps_to_current_exercise(
+    db: Session,
+    user: User,
+    day_number: int,
+    reps_count: int,
+) -> TrainingExerciseProgress:
+    selection = get_active_training_plan(db, user)
+    if selection is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No hay un plan activo seleccionado.",
+        )
+
+    routine = _get_day_routine(db, selection.id, day_number)
+    if routine is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Rutina no encontrada para el día solicitado.",
+        )
+
+    exercises = _get_day_exercises(db, selection.id, day_number)
+    current_exercise = _resolve_current_exercise(exercises)
+    if current_exercise is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No hay ejercicio activo para esta rutina.",
+        )
+    if current_exercise.status == "completed":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="El ejercicio ya fue completado.",
+        )
+
+    if routine.status != "in_progress":
+        routine.status = "in_progress"
+        routine.started_at = routine.started_at or datetime.utcnow()
+
+    if current_exercise.status == "pending":
+        current_exercise.status = "in_progress"
+        current_exercise.started_at = current_exercise.started_at or datetime.utcnow()
+
+    current_exercise.reps_completed_current_set += reps_count
+    current_exercise.updated_at = datetime.utcnow()
+    routine.updated_at = datetime.utcnow()
+
+    db.commit()
+    db.refresh(current_exercise)
+    return current_exercise
+
+
+def complete_current_set(
+    db: Session,
+    user: User,
+    day_number: int,
+) -> dict:
+    selection = get_active_training_plan(db, user)
+    if selection is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No hay un plan activo seleccionado.",
+        )
+
+    routine = _get_day_routine(db, selection.id, day_number)
+    if routine is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Rutina no encontrada para el día solicitado.",
+        )
+
+    exercises = _get_day_exercises(db, selection.id, day_number)
+    current_exercise = _resolve_current_exercise(exercises)
+    if current_exercise is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No hay ejercicio activo para esta rutina.",
+        )
+    if current_exercise.status == "completed":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="El ejercicio ya fue completado.",
+        )
+
+    if current_exercise.reps_target_value is not None and current_exercise.reps_completed_current_set < current_exercise.reps_target_value:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Aún no se completó el objetivo de reps de la serie actual.",
+        )
+
+    current_exercise.sets_completed += 1
+    current_exercise.reps_completed_current_set = 0
+    current_exercise.updated_at = datetime.utcnow()
+
+    if current_exercise.sets_completed >= current_exercise.sets_target:
+        current_exercise.status = "completed"
+        current_exercise.completed_at = datetime.utcnow()
+        current_exercise.updated_at = datetime.utcnow()
+        next_exercise = _advance_to_next_exercise(db, selection, day_number)
+        if next_exercise is None:
+            _finalize_day_if_needed(db, routine, exercises)
+    else:
+        current_exercise.status = "in_progress"
+
+    routine.completed_exercises_count = sum(1 for exercise in exercises if exercise.status == "completed")
+    routine.total_exercises = len(exercises)
+    routine.updated_at = datetime.utcnow()
+
+    db.commit()
+    db.refresh(current_exercise)
+    db.refresh(routine)
+
+    return {
+        "routine": routine,
+        "current_exercise": current_exercise,
+        "exercises": exercises,
+    }
+
+
+def complete_routine_day(
+    db: Session,
+    user: User,
+    day_number: int,
+    completed_exercises_count: Optional[int] = None,
+    total_exercises: Optional[int] = None,
+) -> TrainingRoutineProgress:
+    selection = get_active_training_plan(db, user)
+    if selection is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No hay un plan activo seleccionado.",
+        )
+
+    routine = (
+        db.query(TrainingRoutineProgress)
+        .filter(
+            TrainingRoutineProgress.training_plan_id == selection.id,
+            TrainingRoutineProgress.day_number == day_number,
+        )
+        .first()
+    )
+    if routine is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Rutina no encontrada para el día solicitado.",
+        )
+    exercises = _get_day_exercises(db, selection.id, day_number)
+    if not exercises or not all(exercise.status == "completed" for exercise in exercises):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Todavía quedan ejercicios pendientes en este día.",
+        )
+
+    routine.status = "completed"
+    routine.started_at = routine.started_at or datetime.utcnow()
+    routine.completed_at = routine.completed_at or datetime.utcnow()
+    routine.completed_exercises_count = (
+        completed_exercises_count
+        if completed_exercises_count is not None
+        else len(exercises)
+    )
+    routine.total_exercises = total_exercises if total_exercises is not None else len(exercises)
+    routine.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(routine)
+    return routine
