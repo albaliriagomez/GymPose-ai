@@ -10,6 +10,7 @@ export function useLivePose({
   canvasRef,
   isRunning,
   exerciseMode = 'squat',
+  enablePose = true,
   curlArmSide = 'left',
   curlRepsPerArm = 10,
 }) {
@@ -78,6 +79,12 @@ export function useLivePose({
   })
 
   useEffect(() => {
+    if (!enablePose) {
+      landmarkerRef.current?.close?.()
+      landmarkerRef.current = null
+      return undefined
+    }
+
     let cancelled = false
 
     async function loadLandmarker() {
@@ -108,9 +115,18 @@ export function useLivePose({
       landmarkerRef.current?.close?.()
       landmarkerRef.current = null
     }
-  }, [])
+  }, [enablePose, isRunning])
 
   useEffect(() => {
+    if (!enablePose) {
+      window.cancelAnimationFrame(frameRequestRef.current)
+      lastVideoTimeRef.current = -1
+      const canvas = canvasRef.current
+      const ctx = canvas?.getContext?.('2d')
+      if (ctx && canvas) ctx.clearRect(0, 0, canvas.width, canvas.height)
+      return undefined
+    }
+
     if (!isRunning || !landmarkerRef.current) {
       window.cancelAnimationFrame(frameRequestRef.current)
       lastVideoTimeRef.current = -1
@@ -162,13 +178,17 @@ export function useLivePose({
     return () => {
       window.cancelAnimationFrame(frameRequestRef.current)
     }
-  }, [canvasRef, exerciseMode, isRunning, status, videoRef])
+  }, [canvasRef, enablePose, exerciseMode, isRunning, status, videoRef])
 
-  const effectiveStatus = status === 'ready' && isRunning ? 'tracking' : status
+  const effectiveStatus = !enablePose
+    ? (isRunning ? 'tracking' : 'ready')
+    : status === 'ready' && isRunning
+      ? 'tracking'
+      : status
 
   return {
     status: effectiveStatus,
-    error,
+    error: enablePose ? error : '',
     insights: {
       ...insights,
       exerciseMode,

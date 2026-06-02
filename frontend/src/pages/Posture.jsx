@@ -1,5 +1,6 @@
 import React, { useState, useRef, useCallback } from 'react';
 import DashboardLayout from '../components/DashboardLayout';
+import { redirectToLogin } from '../services/sessionManager.js';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -182,6 +183,10 @@ export default function Posture() {
 
       if (!response.ok) {
         const err = await response.json().catch(() => ({}));
+        if (response.status === 401) {
+          redirectToLogin()
+          return
+        }
         throw new Error(err.detail || `Error ${response.status}`);
       }
 

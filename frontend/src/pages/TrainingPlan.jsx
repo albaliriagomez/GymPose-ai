@@ -339,7 +339,7 @@ export default function TrainingPlan() {
     navigate('/training', {
       state: {
         routineDay: day,
-        routineDayId: day.day_id || day.id || day.day_number,
+        routineDayId: day.day_number,
         trainingPlan: activePlan,
       },
     })

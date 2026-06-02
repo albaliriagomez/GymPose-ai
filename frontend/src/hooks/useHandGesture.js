@@ -1,17 +1,19 @@
 import { useEffect, useRef, useState } from 'react'
-import { createHandLandmarker, detectOkGesture } from '../lib/hand'
+import { createHandLandmarker, detectOkGesture, detectOpenPalmGesture } from '../lib/hand'
 
 export function useHandGesture({ videoRef, isRunning }) {
   const landmarkerRef = useRef(null)
   const frameRequestRef = useRef(0)
   const lastVideoTimeRef = useRef(-1)
-  const stableOkFramesRef = useRef(0)
-
   const [status, setStatus] = useState('loading')
   const [error, setError] = useState('')
   const [isOkGesture, setIsOkGesture] = useState(false)
   const [gestureConfidence, setGestureConfidence] = useState(0)
+  const [isPalmOpenGesture, setIsPalmOpenGesture] = useState(false)
+  const [palmOpenConfidence, setPalmOpenConfidence] = useState(0)
 
+  const stableOkFramesRef = useRef(0)
+  const stablePalmOpenFramesRef = useRef(0)
   useEffect(() => {
     let cancelled = false
 
@@ -48,9 +50,12 @@ export function useHandGesture({ videoRef, isRunning }) {
   useEffect(() => {
     if (!isRunning || !landmarkerRef.current) {
       stableOkFramesRef.current = 0
+      stablePalmOpenFramesRef.current = 0
       queueMicrotask(() => {
         setIsOkGesture(false)
         setGestureConfidence(0)
+        setIsPalmOpenGesture(false)
+        setPalmOpenConfidence(0)
       })
       window.cancelAnimationFrame(frameRequestRef.current)
       return undefined
@@ -73,8 +78,10 @@ export function useHandGesture({ videoRef, isRunning }) {
       if (video.currentTime !== lastVideoTimeRef.current) {
         const result = handLandmarker.detectForVideo(video, performance.now())
         const okGesture = detectOkGesture(result)
+        const palmOpenGesture = detectOpenPalmGesture(result)
 
         setGestureConfidence(okGesture.confidence)
+        setPalmOpenConfidence(palmOpenGesture.confidence)
 
         if (okGesture.detected) {
           stableOkFramesRef.current += 1
@@ -82,7 +89,14 @@ export function useHandGesture({ videoRef, isRunning }) {
           stableOkFramesRef.current = 0
         }
 
+        if (palmOpenGesture.detected) {
+          stablePalmOpenFramesRef.current += 1
+        } else {
+          stablePalmOpenFramesRef.current = 0
+        }
+
         setIsOkGesture(stableOkFramesRef.current >= 2)
+        setIsPalmOpenGesture(stablePalmOpenFramesRef.current >= 2)
         lastVideoTimeRef.current = video.currentTime
       }
 
@@ -101,5 +115,7 @@ export function useHandGesture({ videoRef, isRunning }) {
     error,
     isOkGesture,
     gestureConfidence,
+    isPalmOpenGesture,
+    palmOpenConfidence,
   }
 }

@@ -46,7 +46,7 @@ export function useSquatValidator({
         : isCoreMode
           ? 'Activa la camara para validar el plank.'
         : isManualMode
-          ? 'Este ejercicio no tiene validacion automatica aun.'
+          ? 'Este ejercicio sigue el contador del plan sin validacion por puntos.'
         : 'Activa la camara para validar la sentadilla.',
     }
 
@@ -75,7 +75,7 @@ export function useSquatValidator({
         ...baseValidation,
         bodyCoverage,
         hasRequiredView: true,
-        feedback: 'Modo guía activo. Sigue las repeticiones del plan.',
+        feedback: 'Contador del plan activo. Sigue la serie o el tiempo definido.',
       }
     }
 

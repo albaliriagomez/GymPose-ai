@@ -1,7 +1,12 @@
 from .models import User, Session, Repetition, Nutrition, Notification
 from .nutrition import Meal
 from .progress import ProgressPlan, ProgressLog
-from .training import TrainingPlanSelection, TrainingRoutineProgress, TrainingExerciseProgress
+from .training import (
+    TrainingPlanSelection,
+    TrainingRoutineProgress,
+    TrainingExerciseProgress,
+    TrainingExerciseEvent,
+)
 
 __all__ = [
     "User",
@@ -15,4 +20,5 @@ __all__ = [
     "TrainingPlanSelection",
     "TrainingRoutineProgress",
     "TrainingExerciseProgress",
+    "TrainingExerciseEvent",
 ]

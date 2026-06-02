@@ -5,7 +5,7 @@ import { useNutrition } from '../hooks/useNutrition'
 import DashboardLayout from '../components/DashboardLayout'
 import { getDashboardFull, getWeeklySummary, getDashboardTips } from '../services/dashboardService'
 import {
-  BarChart, Bar, XAxis, YAxis,
+  AreaChart, Area, BarChart, Bar, XAxis, YAxis,
   ResponsiveContainer, Tooltip
 } from 'recharts'
 
@@ -55,9 +55,9 @@ const Ring = ({ value, max, color, size = 88, label, sublabel }) => {
 
 // ── Número que aparece animado ────────────────────────────────────────────────
 const Count = ({ to, suffix = '' }) => {
-  const [n, setN] = useState(0)
+  const [n, setN] = useState(to || 0)
   useEffect(() => {
-    if (!to) { setN(0); return }
+    if (!to) return
     let cur = 0
     const step = to / 40
     const t = setInterval(() => {
@@ -67,7 +67,7 @@ const Count = ({ to, suffix = '' }) => {
     }, 16)
     return () => clearInterval(t)
   }, [to])
-  return <>{n}{suffix}</>
+  return <>{to ? n : 0}{suffix}</>
 }
 
 const getMealMacro = (meal, key) => {
@@ -195,6 +195,7 @@ export default function Dashboard() {
   const { user } = useAuth()
   const navigate  = useNavigate()
   const nutrition = useNutrition()
+  const [lastCompletedRoutine, setLastCompletedRoutine] = useState(null)
 
   const [full,       setFull]       = useState(null)
   const [weekly,     setWeekly]     = useState([])
@@ -203,6 +204,38 @@ export default function Dashboard() {
   const [error,      setError]      = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
   const [spinning,   setSpinning]   = useState(false)
+
+  useEffect(() => {
+    const raw = localStorage.getItem('gympose_last_completed_routine')
+    if (!raw) return
+
+    try {
+      setLastCompletedRoutine(JSON.parse(raw))
+    } catch {
+      localStorage.removeItem('gympose_last_completed_routine')
+    }
+  }, [])
+
+  useEffect(() => {
+    const handleRoutineCompleted = () => {
+      const raw = localStorage.getItem('gympose_last_completed_routine')
+      if (!raw) return
+
+      try {
+        setLastCompletedRoutine(JSON.parse(raw))
+      } catch {
+        localStorage.removeItem('gympose_last_completed_routine')
+      }
+    }
+
+    window.addEventListener('gympose-routine-completed', handleRoutineCompleted)
+    window.addEventListener('storage', handleRoutineCompleted)
+
+    return () => {
+      window.removeEventListener('gympose-routine-completed', handleRoutineCompleted)
+      window.removeEventListener('storage', handleRoutineCompleted)
+    }
+  }, [])
 
   const reload = useCallback(() => {
     setSpinning(true)
@@ -270,6 +303,18 @@ export default function Dashboard() {
 
   // ── Datos ─────────────────────────────────────────────────────────────────
   const ent  = full?.entrenamiento || {}
+  const stats = ent
+  const analysis = ent.ultimo_analisis || ent.ultimoAnalisis || null
+  const sessionsChange = Number(
+    ent.sessions_change ??
+    full?.sessions_change ??
+    0,
+  )
+  const changeLabel = sessionsChange > 0
+    ? `+${sessionsChange}%`
+    : sessionsChange < 0
+      ? `${sessionsChange}%`
+      : 'Sin cambios'
   const calPct = ent.calories_burned && ent.calories_goal
     ? Math.min(100, Math.round((ent.calories_burned / ent.calories_goal) * 100)) : 0
 
@@ -287,6 +332,12 @@ export default function Dashboard() {
   const gras_obj  = Math.round(obj_kcal * 0.30 / 9)
 
   const kcalColor = kcalPct >= 100 ? '#00ff88' : kcalPct >= 70 ? '#00e5ff' : '#ffd60a'
+  const trendData = Array.isArray(weekly)
+    ? weekly.map((day, index) => ({
+        name: day.day || day.date || `D${index + 1}`,
+        v: Number(day.intensity || day.sessions || 0),
+      }))
+    : []
 
   return (
     <DashboardLayout>

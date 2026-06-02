@@ -1,3 +1,5 @@
+import exerciseImageFiles from './exerciseImageManifest.json'
+
 const RAW_EXERCISES = [
   'Abducción de Cadera en Polea',
   'Aperturas con Mancuernas',
@@ -138,6 +140,70 @@ function normalizeText(value) {
     .toLowerCase()
 }
 
+const EXERCISE_IMAGE_FOLDER = '/GymImagenes'
+
+function stripAccents(value) {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+}
+
+function removeParentheticalContent(value) {
+  return value.replace(/\s*\((.*?)\)\s*/g, ' ')
+}
+
+function normalizeImageStem(value) {
+  return value
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+const EXERCISE_IMAGE_OVERRIDES = {
+  [normalizeText('Plank')]: 'Plancha abdominal.jpg',
+  [normalizeText('Curl de Bíceps con Mancuernas')]: 'Curl de Bíceps con Mancuernas.png',
+  [normalizeText('Remo con Banda o Mancuerna')]: 'Remo con mancuerna.jpg',
+  [normalizeText('Marcha en Sitio Rodillas Altas')]: 'Marcha en Sitio Rodillas Altas.jpg',
+  [normalizeText('Plank en Rodillas')]: 'Plancha en rodillas.jpg',
+}
+
+const IMAGE_INDEX = Array.isArray(exerciseImageFiles)
+  ? exerciseImageFiles.map((fileName) => {
+      const lastDotIndex = fileName.lastIndexOf('.')
+      const stem = lastDotIndex > 0 ? fileName.slice(0, lastDotIndex) : fileName
+      return {
+        fileName,
+        normalized: normalizeImageStem(stripAccents(removeParentheticalContent(stem))).toLowerCase(),
+      }
+    })
+  : []
+
+function getImageMatchScore(exerciseNormalized, fileNormalized) {
+  if (!fileNormalized) return 0
+  if (exerciseNormalized === fileNormalized) return 4
+  if (exerciseNormalized.includes(fileNormalized)) return 3
+  if (fileNormalized.includes(exerciseNormalized)) return 2
+  return 0
+}
+
+function resolveExerciseImagePath(name) {
+  const normalizedName = normalizeImageStem(stripAccents(removeParentheticalContent(name))).toLowerCase()
+  const overrideFileName = EXERCISE_IMAGE_OVERRIDES[normalizeText(name)]
+  if (overrideFileName) {
+    return encodeURI(`${EXERCISE_IMAGE_FOLDER}/${overrideFileName}`)
+  }
+
+  const bestMatch = IMAGE_INDEX
+    .map((entry) => ({
+      ...entry,
+      score: getImageMatchScore(normalizedName, entry.normalized),
+    }))
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score || b.normalized.length - a.normalized.length)[0]
+
+  return bestMatch ? encodeURI(`${EXERCISE_IMAGE_FOLDER}/${bestMatch.fileName}`) : null
+}
+
 function inferCategory(name) {
   const rule = CATEGORY_RULES.find((entry) => entry.match(name))
   return rule?.key || 'General'
@@ -173,6 +239,39 @@ function inferTrackingMode(name) {
   return 'manual'
 }
 
+function inferCountMode(name, category, trackingMode) {
+  const normalized = normalizeText(name)
+
+  if (
+    /plank|plancha|caminata|bici|cardio|sprint|marcha en sitio|estiramientos|saltos en caja|burpees|mountain climbers|remo/.test(
+      normalized,
+    ) ||
+    category === 'Cardio / Movilidad' ||
+    normalized.includes('plank')
+  ) {
+    return 'timer'
+  }
+
+  if (trackingMode === 'manual') {
+    return 'manual'
+  }
+
+  return 'reps'
+}
+
+function inferDefaultDurationSeconds(name, countMode) {
+  if (countMode !== 'timer') {
+    return 0
+  }
+
+  const normalized = normalizeText(name)
+  if (/plank|plancha/.test(normalized)) {
+    return 45
+  }
+
+  return 60
+}
+
 function buildDescription(category, trackingMode) {
   if (trackingMode === 'press' || trackingMode === 'squat' || trackingMode === 'curl' || trackingMode === 'core') {
     return `${category} con seguimiento en cámara`
@@ -184,14 +283,26 @@ function buildDescription(category, trackingMode) {
 export const TRAINING_EXERCISES = RAW_EXERCISES.map((name) => {
   const category = inferCategory(name)
   const trackingMode = inferTrackingMode(name)
+  const countMode = inferCountMode(name, category, trackingMode)
+  const imageUrl = resolveExerciseImagePath(name)
 
   return {
     name,
     category,
     trackingMode,
+    countMode,
+    requiresPose: countMode === 'reps' && trackingMode !== 'manual',
+    defaultDurationSeconds: inferDefaultDurationSeconds(name, countMode),
     description: buildDescription(category, trackingMode),
+    imageUrl,
     liveLabel:
-      trackingMode === 'manual' ? 'Modo guía' : trackingMode === 'core' ? 'Core' : 'Live',
+      countMode === 'timer'
+        ? 'Timer'
+        : trackingMode === 'manual'
+          ? 'Modo guía'
+          : trackingMode === 'core'
+            ? 'Core'
+            : 'Live',
   }
 })
 

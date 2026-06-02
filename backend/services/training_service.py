@@ -18,11 +18,12 @@ Ejercicios detectables por MediaPipe en Training.jsx:
 import os, json, re
 from datetime import datetime
 from typing import Optional
+from uuid import UUID
 from groq import Groq
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from schemas.training import TrainingPlan, WorkoutDay, Exercise
-from models import User, TrainingPlanSelection, TrainingRoutineProgress, TrainingExerciseProgress
+from models import User, TrainingPlanSelection, TrainingRoutineProgress, TrainingExerciseProgress, TrainingExerciseEvent
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  CONSTANTE: qué ejercicios detecta MediaPipe hoy
@@ -693,7 +694,19 @@ def _extract_reps_target_value(reps_target: str | None) -> Optional[int]:
     return int(match.group(0))
 
 
-def _exercise_to_payload(exercise: TrainingExerciseProgress) -> dict:
+def _exercise_rest_seconds(plan_payload: dict, day_number: int, exercise_order: int) -> Optional[int]:
+    days = plan_payload.get("days") or []
+    for day in days:
+        if int(day.get("day_number", 0) or 0) != day_number:
+            continue
+        exercises = day.get("exercises") or []
+        if 1 <= exercise_order <= len(exercises):
+            exercise = exercises[exercise_order - 1] or {}
+            return exercise.get("rest_seconds")
+    return None
+
+
+def _exercise_to_payload(exercise: TrainingExerciseProgress, rest_seconds: Optional[int] = None) -> dict:
     current_set = exercise.sets_target if exercise.status == "completed" else min(exercise.sets_completed + 1, exercise.sets_target)
     return {
         "id": exercise.id,
@@ -706,6 +719,7 @@ def _exercise_to_payload(exercise: TrainingExerciseProgress) -> dict:
         "sets_completed": exercise.sets_completed,
         "reps_completed_current_set": exercise.reps_completed_current_set,
         "current_set": current_set,
+        "rest_seconds": rest_seconds,
         "status": exercise.status,
         "started_at": exercise.started_at,
         "completed_at": exercise.completed_at,
@@ -713,18 +727,133 @@ def _exercise_to_payload(exercise: TrainingExerciseProgress) -> dict:
 
 
 def _day_to_payload(
+    selection: TrainingPlanSelection,
     routine: TrainingRoutineProgress,
     exercises: list[TrainingExerciseProgress],
 ) -> dict:
     current_exercise = _resolve_current_exercise(exercises)
-    completed_count = sum(1 for exercise in exercises if exercise.status == "completed")
+    summary = _build_session_summary(routine, exercises)
+    plan_payload = selection.plan_payload or {}
     return {
         **_routine_to_payload(routine),
         "day_id": routine.id,
-        "completed_exercises_count": completed_count,
-        "current_exercise": _exercise_to_payload(current_exercise) if current_exercise else None,
-        "exercises": [_exercise_to_payload(exercise) for exercise in exercises],
+        "completed_exercises_count": summary["completed_exercises"],
+        "total_exercises": summary["total_exercises"],
+        "total_sets_target": summary["total_sets"],
+        "total_sets_completed": summary["completed_sets"],
+        "total_reps_completed": summary["total_reps"],
+        "progress_pct": summary["progress_pct"],
+        "current_exercise": (
+            _exercise_to_payload(
+                current_exercise,
+                _exercise_rest_seconds(plan_payload, routine.day_number, current_exercise.exercise_order),
+            )
+            if current_exercise
+            else None
+        ),
+        "exercises": [
+            _exercise_to_payload(
+                exercise,
+                _exercise_rest_seconds(plan_payload, routine.day_number, exercise.exercise_order),
+            )
+            for exercise in exercises
+        ],
+        "session_summary": summary,
     }
+
+
+def _exercise_total_reps_completed(exercise: TrainingExerciseProgress) -> int:
+    reps_target = exercise.reps_target_value or 0
+    completed_sets = min(exercise.sets_completed or 0, exercise.sets_target or 0)
+    current_reps = max(0, exercise.reps_completed_current_set or 0)
+    return (completed_sets * reps_target) + current_reps
+
+
+def _build_session_summary(
+    routine: TrainingRoutineProgress,
+    exercises: list[TrainingExerciseProgress],
+) -> dict:
+    total_exercises = len(exercises)
+    completed_exercises = sum(1 for exercise in exercises if exercise.status == "completed")
+    total_sets = sum(exercise.sets_target or 0 for exercise in exercises)
+    completed_sets = sum(min(exercise.sets_completed or 0, exercise.sets_target or 0) for exercise in exercises)
+    total_reps = sum(_exercise_total_reps_completed(exercise) for exercise in exercises)
+    progress_pct = round((completed_exercises / max(1, total_exercises)) * 100, 1)
+    started_at = routine.started_at
+    completed_at = routine.completed_at
+    duration_seconds = None
+    if started_at and completed_at:
+        duration_seconds = max(0, int((completed_at - started_at).total_seconds()))
+
+    return {
+        "day_completed": routine.status == "completed",
+        "day_number": routine.day_number,
+        "day_name": routine.day_name,
+        "total_exercises": total_exercises,
+        "completed_exercises": completed_exercises,
+        "total_sets": total_sets,
+        "completed_sets": completed_sets,
+        "total_reps": total_reps,
+        "progress_pct": progress_pct,
+        "started_at": started_at,
+        "completed_at": completed_at,
+        "duration_seconds": duration_seconds,
+    }
+
+
+def _event_exists(
+    db: Session,
+    user: User,
+    day_number: int,
+    event_type: str,
+    client_event_id: Optional[UUID],
+) -> bool:
+    if client_event_id is None:
+        return False
+
+    return (
+        db.query(TrainingExerciseEvent.id)
+        .filter(
+            TrainingExerciseEvent.user_id == user.id,
+            TrainingExerciseEvent.day_number == day_number,
+            TrainingExerciseEvent.event_type == event_type,
+            TrainingExerciseEvent.client_event_id == client_event_id,
+        )
+        .first()
+        is not None
+    )
+
+
+def _register_event(
+    db: Session,
+    selection: TrainingPlanSelection,
+    routine: TrainingRoutineProgress,
+    exercise: TrainingExerciseProgress,
+    user: User,
+    event_type: str,
+    client_event_id: Optional[UUID] = None,
+    reps_delta: Optional[int] = None,
+    sets_delta: Optional[int] = None,
+    payload: Optional[dict] = None,
+) -> bool:
+    if _event_exists(db, user, routine.day_number, event_type, client_event_id):
+        return False
+
+    db.add(
+        TrainingExerciseEvent(
+            training_plan_id=selection.id,
+            training_routine_id=routine.id,
+            training_exercise_id=exercise.id,
+            user_id=user.id,
+            day_number=routine.day_number,
+            event_type=event_type,
+            client_event_id=client_event_id,
+            reps_delta=reps_delta,
+            sets_delta=sets_delta,
+            payload=payload or {},
+        )
+    )
+    return True
 
 
 def _get_day_routine(db: Session, selection_id: int, day_number: int) -> Optional[TrainingRoutineProgress]:
@@ -905,7 +1034,7 @@ def build_current_plan_response(db: Session, user: User) -> dict:
     current_day_payload = None
     if current_routine:
         exercises = _get_day_exercises(db, selection.id, current_routine.day_number)
-        current_day_payload = _day_to_payload(current_routine, exercises)
+        current_day_payload = _day_to_payload(selection, current_routine, exercises)
 
     return {
         "plan": {
@@ -935,14 +1064,18 @@ def build_routines_progress_response(db: Session, user: User) -> dict:
     routines_payload = []
     for routine in routines:
         exercises = _get_day_exercises(db, selection.id, routine.day_number)
-        routines_payload.append(_day_to_payload(routine, exercises))
+        routines_payload.append(_day_to_payload(selection, routine, exercises))
 
     return {
         "plan_id": selection.id,
         "plan_variant": selection.plan_variant,
         "frequency": selection.frequency,
         "routines": routines_payload,
-        "current_day": _day_to_payload(current_routine, _get_day_exercises(db, selection.id, current_routine.day_number)) if current_routine else None,
+        "current_day": _day_to_payload(
+            selection,
+            current_routine,
+            _get_day_exercises(db, selection.id, current_routine.day_number),
+        ) if current_routine else None,
     }
 
 
@@ -962,10 +1095,15 @@ def build_day_progress_response(db: Session, user: User, day_number: int) -> dic
         )
 
     exercises = _get_day_exercises(db, selection.id, day_number)
-    return _day_to_payload(routine, exercises)
+    return _day_to_payload(selection, routine, exercises)
 
 
-def start_routine_day(db: Session, user: User, day_number: int) -> TrainingRoutineProgress:
+def start_routine_day(
+    db: Session,
+    user: User,
+    day_number: int,
+    client_event_id: Optional[UUID] = None,
+) -> TrainingRoutineProgress:
     selection = get_active_training_plan(db, user)
     if selection is None:
         raise HTTPException(
@@ -987,10 +1125,11 @@ def start_routine_day(db: Session, user: User, day_number: int) -> TrainingRouti
             detail="Rutina no encontrada para el día solicitado.",
         )
     if routine.status == "completed":
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="La rutina ya fue completada.",
-        )
+        return routine
+
+    if _event_exists(db, user, day_number, "routine_start", client_event_id):
+        return routine
+
     if routine.status != "in_progress":
         routine.status = "in_progress"
         routine.started_at = routine.started_at or datetime.utcnow()
@@ -1001,6 +1140,17 @@ def start_routine_day(db: Session, user: User, day_number: int) -> TrainingRouti
         first_exercise.status = "in_progress"
         first_exercise.started_at = first_exercise.started_at or datetime.utcnow()
         first_exercise.updated_at = datetime.utcnow()
+    if first_exercise is not None:
+        _register_event(
+            db=db,
+            selection=selection,
+            routine=routine,
+            exercise=first_exercise,
+            user=user,
+            event_type="routine_start",
+            client_event_id=client_event_id,
+            payload={"day_number": day_number},
+        )
     db.commit()
     db.refresh(routine)
     return routine
@@ -1047,6 +1197,7 @@ def add_reps_to_current_exercise(
     user: User,
     day_number: int,
     reps_count: int,
+    client_event_id: Optional[UUID] = None,
 ) -> TrainingExerciseProgress:
     selection = get_active_training_plan(db, user)
     if selection is None:
@@ -1069,11 +1220,10 @@ def add_reps_to_current_exercise(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No hay ejercicio activo para esta rutina.",
         )
+    if _event_exists(db, user, day_number, "rep", client_event_id):
+        return current_exercise
     if current_exercise.status == "completed":
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="El ejercicio ya fue completado.",
-        )
+        return current_exercise
 
     if routine.status != "in_progress":
         routine.status = "in_progress"
@@ -1086,6 +1236,17 @@ def add_reps_to_current_exercise(
     current_exercise.reps_completed_current_set += reps_count
     current_exercise.updated_at = datetime.utcnow()
     routine.updated_at = datetime.utcnow()
+    _register_event(
+        db=db,
+        selection=selection,
+        routine=routine,
+        exercise=current_exercise,
+        user=user,
+        event_type="rep",
+        client_event_id=client_event_id,
+        reps_delta=reps_count,
+        payload={"day_number": day_number, "reps_count": reps_count},
+    )
 
     db.commit()
     db.refresh(current_exercise)
@@ -1096,6 +1257,7 @@ def complete_current_set(
     db: Session,
     user: User,
     day_number: int,
+    client_event_id: Optional[UUID] = None,
 ) -> dict:
     selection = get_active_training_plan(db, user)
     if selection is None:
@@ -1118,11 +1280,18 @@ def complete_current_set(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No hay ejercicio activo para esta rutina.",
         )
+    if _event_exists(db, user, day_number, "set_complete", client_event_id):
+        return {
+            "routine": routine,
+            "current_exercise": current_exercise,
+            "exercises": exercises,
+        }
     if current_exercise.status == "completed":
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="El ejercicio ya fue completado.",
-        )
+        return {
+            "routine": routine,
+            "current_exercise": current_exercise,
+            "exercises": exercises,
+        }
 
     if current_exercise.reps_target_value is not None and current_exercise.reps_completed_current_set < current_exercise.reps_target_value:
         raise HTTPException(
@@ -1147,6 +1316,17 @@ def complete_current_set(
     routine.completed_exercises_count = sum(1 for exercise in exercises if exercise.status == "completed")
     routine.total_exercises = len(exercises)
     routine.updated_at = datetime.utcnow()
+    _register_event(
+        db=db,
+        selection=selection,
+        routine=routine,
+        exercise=current_exercise,
+        user=user,
+        event_type="set_complete",
+        client_event_id=client_event_id,
+        sets_delta=1,
+        payload={"day_number": day_number},
+    )
 
     db.commit()
     db.refresh(current_exercise)
@@ -1166,6 +1346,7 @@ def complete_routine_day(
     completed_exercises_count: Optional[int] = None,
     total_exercises: Optional[int] = None,
     force: bool = False,
+    client_event_id: Optional[UUID] = None,
 ) -> TrainingRoutineProgress:
     selection = get_active_training_plan(db, user)
     if selection is None:
@@ -1187,6 +1368,11 @@ def complete_routine_day(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Rutina no encontrada para el día solicitado.",
         )
+    if _event_exists(db, user, day_number, "routine_complete", client_event_id):
+        return routine
+    if routine.status == "completed":
+        return routine
+
     exercises = _get_day_exercises(db, selection.id, day_number)
     if not exercises:
         raise HTTPException(
@@ -1210,6 +1396,20 @@ def complete_routine_day(
     )
     routine.total_exercises = total_exercises if total_exercises is not None else len(exercises)
     routine.updated_at = datetime.utcnow()
+    _register_event(
+        db=db,
+        selection=selection,
+        routine=routine,
+        exercise=_resolve_current_exercise(exercises) or exercises[-1],
+        user=user,
+        event_type="routine_complete",
+        client_event_id=client_event_id,
+        payload={
+            "day_number": day_number,
+            "completed_exercises_count": routine.completed_exercises_count,
+            "total_exercises": routine.total_exercises,
+        },
+    )
     db.commit()
     db.refresh(routine)
     return routine

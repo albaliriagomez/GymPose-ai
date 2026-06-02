@@ -6,6 +6,7 @@ Endpoints del módulo de Plan de Entrenamiento.
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session as DBSession
 from typing import Optional
+from uuid import UUID
 
 from database import get_db
 from models import User
@@ -25,6 +26,7 @@ from schemas.training import (
     TrainingPlan,
     TrainingPlanSelectRequest,
     TrainingExerciseRepRequest,
+    TrainingExerciseEventRequest,
     TrainingRoutineCompleteRequest,
     TrainingRoutineDayProgressItem,
     TrainingRoutineProgressResponse,
@@ -167,10 +169,11 @@ def get_routines_progress(
 @router.post("/routines/{day_id}/start", response_model=TrainingRoutineDayProgressItem)
 def start_routine(
     day_id: int,
+    client_event_id: Optional[UUID] = None,
     current_user: User = Depends(get_current_user),
     db: DBSession = Depends(get_db),
 ):
-    start_routine_day(db=db, user=current_user, day_number=day_id)
+    start_routine_day(db=db, user=current_user, day_number=day_id, client_event_id=client_event_id)
     return TrainingRoutineDayProgressItem(**build_day_progress_response(db, current_user, day_id))
 
 
@@ -190,17 +193,29 @@ def add_reps(
     current_user: User = Depends(get_current_user),
     db: DBSession = Depends(get_db),
 ):
-    add_reps_to_current_exercise(db=db, user=current_user, day_number=day_id, reps_count=body.reps_count)
+    add_reps_to_current_exercise(
+        db=db,
+        user=current_user,
+        day_number=day_id,
+        reps_count=body.reps_count,
+        client_event_id=body.client_event_id,
+    )
     return TrainingRoutineDayProgressItem(**build_day_progress_response(db, current_user, day_id))
 
 
 @router.post("/routines/{day_id}/exercise/set-complete", response_model=TrainingRoutineDayProgressItem)
 def complete_set(
     day_id: int,
+    body: TrainingExerciseEventRequest,
     current_user: User = Depends(get_current_user),
     db: DBSession = Depends(get_db),
 ):
-    complete_current_set(db=db, user=current_user, day_number=day_id)
+    complete_current_set(
+        db=db,
+        user=current_user,
+        day_number=day_id,
+        client_event_id=body.client_event_id,
+    )
     return TrainingRoutineDayProgressItem(**build_day_progress_response(db, current_user, day_id))
 
 

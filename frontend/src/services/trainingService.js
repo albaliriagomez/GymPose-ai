@@ -1,16 +1,14 @@
 /**
  * services/trainingService.js — GymPose
  */
-import axios from 'axios'
-
-const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+import api from './apiClient'
 
 /**
  * Obtiene las 3 variantes de plan + recomendación IA.
  * @returns {Promise<{ variantes: { A, B, C }, recomendacion: { variante_recomendada, razon, coaching_tip } }>}
  */
 export async function getTrainingPlans(token, frequency = 'media') {
-  const { data } = await axios.get(`${BASE_URL}/training/plans`, {
+  const { data } = await api.get('/training/plans', {
     params: { frequency },
     headers: { Authorization: `Bearer ${token}` },
   })
@@ -18,8 +16,8 @@ export async function getTrainingPlans(token, frequency = 'media') {
 }
 
 export async function selectTrainingPlan(token, { planVariant, frequency = 'media' }) {
-  const { data } = await axios.post(
-    `${BASE_URL}/training/plans/select`,
+  const { data } = await api.post(
+    '/training/plans/select',
     { plan_variant: planVariant, frequency },
     { headers: { Authorization: `Bearer ${token}` } },
   )
@@ -27,7 +25,7 @@ export async function selectTrainingPlan(token, { planVariant, frequency = 'medi
 }
 
 export async function getRoutineProgress(token, dayId) {
-  const { data } = await axios.get(`${BASE_URL}/training/routines/${dayId}/progress`, {
+  const { data } = await api.get(`/training/routines/${dayId}/progress`, {
     headers: { Authorization: `Bearer ${token}` },
   })
   return data
@@ -42,30 +40,34 @@ export async function getRoutinesProgress(token) {
 
 export async function getCurrentTrainingState(token) {
   try {
-    const { data } = await axios.get(`${BASE_URL}/training/routines/current`, {
+    const { data } = await api.get('/training/routines/current', {
       headers: { Authorization: `Bearer ${token}` },
     })
     return data
-  } catch {
-    const { data } = await axios.get(`${BASE_URL}/training/plans/current`, {
+  } catch (err) {
+    if (err.response?.status === 401) {
+      return null
+    }
+
+    const { data } = await api.get('/training/plans/current', {
       headers: { Authorization: `Bearer ${token}` },
     })
     return data
   }
 }
 
-export async function startRoutineDay(token, dayId) {
-  const { data } = await axios.post(
-    `${BASE_URL}/training/routines/${dayId}/start`,
-    {},
+export async function startRoutineDay(token, dayId, payload = {}) {
+  const { data } = await api.post(
+    `/training/routines/${dayId}/start`,
+    payload,
     { headers: { Authorization: `Bearer ${token}` } },
   )
   return data
 }
 
 export async function recordRoutineReps(token, dayId, payload = {}) {
-  const { data } = await axios.post(
-    `${BASE_URL}/training/routines/${dayId}/exercise/reps`,
+  const { data } = await api.post(
+    `/training/routines/${dayId}/exercise/reps`,
     payload,
     { headers: { Authorization: `Bearer ${token}` } },
   )
@@ -73,8 +75,8 @@ export async function recordRoutineReps(token, dayId, payload = {}) {
 }
 
 export async function completeRoutineSet(token, dayId, payload = {}) {
-  const { data } = await axios.post(
-    `${BASE_URL}/training/routines/${dayId}/exercise/set-complete`,
+  const { data } = await api.post(
+    `/training/routines/${dayId}/exercise/set-complete`,
     payload,
     { headers: { Authorization: `Bearer ${token}` } },
   )
@@ -82,8 +84,8 @@ export async function completeRoutineSet(token, dayId, payload = {}) {
 }
 
 export async function completeRoutineDay(token, dayId, payload = {}) {
-  const { data } = await axios.post(
-    `${BASE_URL}/training/routines/${dayId}/complete`,
+  const { data } = await api.post(
+    `/training/routines/${dayId}/complete`,
     payload,
     { headers: { Authorization: `Bearer ${token}` } },
   )
@@ -94,7 +96,7 @@ export async function completeRoutineDay(token, dayId, payload = {}) {
  * @deprecated Usa getTrainingPlans. Mantiene compatibilidad con código antiguo.
  */
 export async function getTrainingPlan(token, frequency = 'media') {
-  const { data } = await axios.get(`${BASE_URL}/training/plan`, {
+  const { data } = await api.get('/training/plan', {
     params: { frequency },
     headers: { Authorization: `Bearer ${token}` },
   })

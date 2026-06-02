@@ -113,8 +113,8 @@ export function buildPoseInsights(poseLandmarkerResult, exerciseMode = 'squat') 
       rightElbowAngle: null,
       repCount: 0,
       feedback: pose
-        ? 'Ejercicio manual seleccionado. Sigue el plan del backend como guía.'
-        : 'Ejercicio manual listo. Ponte frente a la cámara si quieres ver tu postura.',
+        ? 'Ejercicio sin validación por puntos. Sigue el contador del plan.'
+        : 'Ejercicio sin validación por puntos. Sigue el contador del plan.',
     }
   }
 

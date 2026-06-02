@@ -1,5 +1,17 @@
 from database import engine, Base
-from models import User, Session, Repetition, Nutrition, Notification, ProgressPlan, ProgressLog, TrainingPlanSelection, TrainingRoutineProgress, TrainingExerciseProgress
+from models import (
+    User,
+    Session,
+    Repetition,
+    Nutrition,
+    Notification,
+    ProgressPlan,
+    ProgressLog,
+    TrainingPlanSelection,
+    TrainingRoutineProgress,
+    TrainingExerciseProgress,
+    TrainingExerciseEvent,
+)
 
 def create_tables():
     print("Sincronizando modelos con Supabase...")
