@@ -318,6 +318,10 @@ export default function TrainingPlan() {
             [selectedVariant]: data.plan.plan,
           }))
         }
+        setTimeout(() => {
+        navigate('/training-progress')
+      }, 500)
+      
       } catch (err) {
         setSaveNotice({
           title: 'No se pudo guardar',

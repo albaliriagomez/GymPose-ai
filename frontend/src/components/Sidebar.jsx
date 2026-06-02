@@ -45,6 +45,12 @@ export default function Sidebar() {
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M4 19h16M6 16V9M12 16V5M18 16v-7"/>
           </svg>} />
+        <Item to="/training-progress" label="Progreso" icon={
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M4 19h16"/>
+            <path d="M4 14l5-5 5 5 6-6"/>
+            <path d="M4 9h4"/>
+          </svg>} />
         <Item to="/training" label="Entrenar" icon={
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M6 4v16M18 4v16M3 8h18M3 16h18"/>
