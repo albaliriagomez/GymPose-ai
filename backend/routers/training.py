@@ -217,5 +217,6 @@ def complete_routine(
         day_number=day_id,
         completed_exercises_count=body.completed_exercises_count,
         total_exercises=body.total_exercises,
+        force=body.force,
     )
     return TrainingRoutineDayProgressItem(**build_day_progress_response(db, current_user, day_id))

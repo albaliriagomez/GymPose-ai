@@ -125,3 +125,4 @@ class TrainingRoutineProgressResponse(BaseModel):
 class TrainingRoutineCompleteRequest(BaseModel):
     completed_exercises_count: Optional[int] = Field(None, ge=0)
     total_exercises: Optional[int] = Field(None, ge=0)
+    force: Optional[bool] = Field(False)

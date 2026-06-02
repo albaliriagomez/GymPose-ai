@@ -11,6 +11,7 @@ import Register from './pages/Register'
 import Dashboard from './pages/Dashboard'
 import TrainerDashboard from './pages/TrainerDashboard'
 import Training from './pages/Training'
+import TrainingProgress from './pages/TrainingProgress'
 import { Nutrition, Settings } from './pages/Placeholders'
 import Posture from './pages/Posture'
 import TrainingPlan from './pages/TrainingPlan'
@@ -28,6 +29,7 @@ createRoot(document.getElementById('root')).render(
           <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
           <Route path="/trainer/dashboard" element={<ProtectedRoute allowedRoles={['trainer']}><TrainerDashboard /></ProtectedRoute>} />
           <Route path="/training" element={<ProtectedRoute><Training /></ProtectedRoute>} />
+          <Route path="/training-progress" element={<ProtectedRoute><TrainingProgress /></ProtectedRoute>} />
           <Route path="/posture" element={<ProtectedRoute><Posture /></ProtectedRoute>} />
           <Route path="/nutrition" element={<ProtectedRoute><Nutrition /></ProtectedRoute>} />
           <Route path="/plan" element={<ProtectedRoute><TrainingPlan /></ProtectedRoute>} />

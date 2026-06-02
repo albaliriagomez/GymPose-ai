@@ -6,6 +6,7 @@ import { getUnreadCount } from '../services/notificationService'
 const links = [
   { to: '/dashboard',     label: 'Dashboard' },
   { to: '/training',      label: 'Entrenamiento' },
+  { to: '/training-progress', label: 'Progreso' },
   { to: '/posture',       label: 'Postura' },
   { to: '/nutrition',     label: 'Nutrición' },
   { to: '/plan',          label: 'Plan' },

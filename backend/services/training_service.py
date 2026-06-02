@@ -1165,6 +1165,7 @@ def complete_routine_day(
     day_number: int,
     completed_exercises_count: Optional[int] = None,
     total_exercises: Optional[int] = None,
+    force: bool = False,
 ) -> TrainingRoutineProgress:
     selection = get_active_training_plan(db, user)
     if selection is None:
@@ -1187,7 +1188,13 @@ def complete_routine_day(
             detail="Rutina no encontrada para el día solicitado.",
         )
     exercises = _get_day_exercises(db, selection.id, day_number)
-    if not exercises or not all(exercise.status == "completed" for exercise in exercises):
+    if not exercises:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No se encontraron ejercicios para este día.",
+        )
+
+    if not force and not all(exercise.status == "completed" for exercise in exercises):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Todavía quedan ejercicios pendientes en este día.",
