@@ -20,6 +20,8 @@ export function useSquatValidator({
 }) {
   return useMemo(() => {
     const isArmMode = exerciseMode === 'press' || exerciseMode === 'curl'
+    const isCoreMode = exerciseMode === 'core'
+    const isManualMode = exerciseMode === 'manual'
     const activeElbowAngle =
       exerciseMode === 'curl'
         ? curlArmSide === 'left'
@@ -41,6 +43,10 @@ export function useSquatValidator({
         ? exerciseMode === 'curl'
           ? 'Activa la camara para validar el curl de biceps.'
           : 'Activa la camara para validar el press militar.'
+        : isCoreMode
+          ? 'Activa la camara para validar el plank.'
+        : isManualMode
+          ? 'Este ejercicio no tiene validacion automatica aun.'
         : 'Activa la camara para validar la sentadilla.',
     }
 
@@ -56,7 +62,20 @@ export function useSquatValidator({
           ? exerciseMode === 'curl'
             ? 'Ponte frente a la camara para empezar a contar curls.'
             : 'Ponte frente a la camara para empezar a contar presses.'
-          : 'Ponte frente a la camara para empezar a contar sentadillas.',
+          : isCoreMode
+            ? 'Ponte frente a la camara para empezar a validar el plank.'
+            : isManualMode
+              ? 'Ponte frente a la camara si quieres ver la postura, pero este ejercicio es manual.'
+            : 'Ponte frente a la camara para empezar a contar sentadillas.',
+      }
+    }
+
+    if (isManualMode) {
+      return {
+        ...baseValidation,
+        bodyCoverage,
+        hasRequiredView: true,
+        feedback: 'Modo guía activo. Sigue las repeticiones del plan.',
       }
     }
 
@@ -137,6 +156,40 @@ export function useSquatValidator({
         hasRequiredView: true,
         bodyCoverage,
         feedback,
+      }
+    }
+
+    if (exerciseMode === 'core') {
+      if (torsoAngle == null) {
+        return {
+          ...baseValidation,
+          bodyCoverage,
+          feedback: 'Necesito ver hombros, caderas y piernas para validar el plank.',
+        }
+      }
+
+      if (!hasRequiredView) {
+        return {
+          ...baseValidation,
+          bodyCoverage,
+          feedback: `No veo tu cuerpo completo. Ajusta la camara para mostrar hombros, caderas y piernas (${bodyCoverage}%).`,
+        }
+      }
+
+      const torsoStable = torsoAngle <= 20
+      const deepEnough = bodyCoverage >= 75
+
+      return {
+        ...baseValidation,
+        isReady: true,
+        isValid: torsoStable && deepEnough,
+        deepEnough,
+        torsoStable,
+        hasRequiredView: true,
+        bodyCoverage,
+        feedback: torsoStable
+          ? 'Plank detectado. Mantén el core firme y la cadera estable.'
+          : 'Alinea mejor el torso para sostener el plank.',
       }
     }
 

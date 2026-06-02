@@ -8,7 +8,7 @@ from sqlalchemy import engine_from_config, pool
 from dotenv import load_dotenv
 
 from database import Base
-from models import models, nutrition  # noqa: F401
+from models import models, nutrition, training  # noqa: F401
 
 load_dotenv()
 

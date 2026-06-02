@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import DashboardLayout from '../components/DashboardLayout'
-import { getTrainingPlans } from '../services/trainingService'
+import { getTrainingPlans, selectTrainingPlan } from '../services/trainingService'
 
 // ─── Colores por tipo de plan ─────────────────────────────────────────────────
 const PLAN_COLORS = {
@@ -101,7 +102,7 @@ function ExerciseRow({ exercise, index }) {
 }
 
 // ─── Card de día ──────────────────────────────────────────────────────────────
-function WorkoutDayCard({ day, planType }) {
+function WorkoutDayCard({ day, planType, onStartRoutine }) {
   const [expanded, setExpanded] = useState(false)
   const colors = PLAN_COLORS[planType] || PLAN_COLORS['Mantenimiento']
   const detectableCount = day.exercises.filter(e => e.notes?.includes('Detectable en tiempo real')).length
@@ -135,16 +136,27 @@ function WorkoutDayCard({ day, planType }) {
         </div>
       </button>
 
-      {expanded && (
-        <div className="px-4 pb-4 pt-2 space-y-2 bg-gym-sidebar">
-          {day.exercises.map((ex, i) => (
-            <ExerciseRow key={i} exercise={ex} index={i} />
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
+        {expanded && (
+          <div className="px-4 pb-4 pt-2 space-y-2 bg-gym-sidebar">
+            {day.exercises.map((ex, i) => (
+              <ExerciseRow key={i} exercise={ex} index={i} />
+            ))}
+            {onStartRoutine && (
+              <div className="pt-2">
+                <button
+                  type="button"
+                  onClick={() => onStartRoutine(day)}
+                  className="w-full rounded-xl border border-gym-cyan/30 bg-gym-cyan/10 px-4 py-3 text-sm font-mono uppercase tracking-[0.18em] text-gym-cyan transition-colors hover:bg-gym-cyan/15"
+                >
+                  Empezar rutina de este día
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    )
+  }
 
 // ─── Selector de variantes A/B/C ─────────────────────────────────────────────
 function VariantSelector({ variants, selectedVariant, recommended, onSelect }) {
@@ -217,42 +229,120 @@ function CoachingTip({ recomendacion }) {
 
 // ─── Componente principal ─────────────────────────────────────────────────────
 export default function TrainingPlan() {
-  const [frequency, setFrequency]           = useState('media')
-  const [variants, setVariants]             = useState(null)   // { A: plan, B: plan, C: plan }
-  const [recomendacion, setRecomendacion]   = useState(null)
-  const [selectedVariant, setSelectedVariant] = useState('A')
-  const [loading, setLoading]               = useState(false)
-  const [error, setError]                   = useState(null)
+  const navigate = useNavigate()
+  const [frequency, setFrequency] = useState('media')
+  const [variants, setVariants] = useState(null)   // { A: plan, B: plan, C: plan }
+  const [recomendacion, setRecomendacion] = useState(null)
+  const [selectedVariant, setSelectedVariant] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(null)
+  const [saveNotice, setSaveNotice] = useState(null)
   const token = localStorage.getItem('gympose_token')
 
-  const fetchPlans = async (freq) => {
-    setLoading(true)
-    setError(null)
-    try {
-      const data = await getTrainingPlans(token, freq)
-      // data = { variantes: { A, B, C }, recomendacion: { variante_recomendada, razon, coaching_tip } }
-      setVariants(data.variantes)
-      setRecomendacion(data.recomendacion)
-      // Auto-seleccionar la que recomienda la IA
-      if (data.recomendacion?.variante_recomendada) {
-        setSelectedVariant(data.recomendacion.variante_recomendada)
-      }
-    } catch (err) {
-      const msg = err.response?.data?.detail || 'Error al cargar el plan'
-      setError(msg)
-    } finally {
-      setLoading(false)
-    }
-  }
+  useEffect(() => {
+    let cancelled = false
 
-  useEffect(() => { fetchPlans(frequency) }, [])
+    const loadPlans = async () => {
+      setLoading(true)
+      setError(null)
+      try {
+        const data = await getTrainingPlans(token, frequency)
+        if (cancelled) return
+
+        // data = { variantes: { A, B, C }, recomendacion: { variante_recomendada, razon, coaching_tip } }
+        setVariants(data.variantes)
+        setRecomendacion(data.recomendacion)
+        setSelectedVariant((current) => {
+          const currentVariant = current
+          if (currentVariant && data.variantes?.[currentVariant]) {
+            return currentVariant
+          }
+
+          const recommendedVariant = data.recomendacion?.variante_recomendada
+          if (recommendedVariant && data.variantes?.[recommendedVariant]) {
+            return recommendedVariant
+          }
+
+          return Object.keys(data.variantes || {})[0] || null
+        })
+      } catch (err) {
+        if (cancelled) return
+        const msg = err.response?.data?.detail || 'Error al cargar el plan'
+        setError(msg)
+      } finally {
+        if (!cancelled) {
+          setLoading(false)
+        }
+      }
+    }
+
+    loadPlans()
+
+    return () => {
+      cancelled = true
+    }
+  }, [frequency, token])
 
   const handleFrequency = (freq) => {
     setFrequency(freq)
-    fetchPlans(freq)
+    setSaveNotice(null)
+  }
+
+  const handleSaveRoutine = () => {
+    if (!activePlan || !selectedVariant) return
+
+    const persistPlan = async () => {
+      try {
+        const data = await selectTrainingPlan(token, {
+          planVariant: selectedVariant,
+          frequency,
+        })
+
+        setSaveNotice({
+          title: 'Rutina guardada',
+          message: `Se guardó la variante ${selectedVariant} del plan ${activePlan.plan_type}. Ahora aparece en Entrenar.`,
+        })
+
+        localStorage.setItem(
+          'gympose_training_plan',
+          JSON.stringify({
+            ...activePlan,
+            variant: selectedVariant,
+            frequency,
+          }),
+        )
+
+        if (data?.plan?.plan) {
+          setVariants((current) => ({
+            ...(current || {}),
+            [selectedVariant]: data.plan.plan,
+          }))
+        }
+      } catch (err) {
+        setSaveNotice({
+          title: 'No se pudo guardar',
+          message: err.response?.data?.detail || err.message || 'Error al guardar la rutina.',
+        })
+      }
+    }
+
+    void persistPlan()
+  }
+
+  const handleStartRoutine = (day) => {
+    if (!activePlan || !day) return
+
+    navigate('/training', {
+      state: {
+        routineDay: day,
+        routineDayId: day.day_id || day.id || day.day_number,
+        trainingPlan: activePlan,
+      },
+    })
   }
 
   const activePlan = variants?.[selectedVariant]
+
   const colors = activePlan
     ? (PLAN_COLORS[activePlan.plan_type] || PLAN_COLORS['Mantenimiento'])
     : PLAN_COLORS['Mantenimiento']
@@ -266,6 +356,17 @@ export default function TrainingPlan() {
           <p className="text-gym-muted font-mono text-xs mb-1">PLAN PERSONALIZADO · IA</p>
           <h1 className="font-display font-bold text-3xl text-white">Mi Plan de Entrenamiento</h1>
         </div>
+
+        {saveNotice && (
+          <div className="rounded-2xl border border-emerald-400/30 bg-emerald-500/10 px-4 py-3">
+            <p className="text-xs font-mono uppercase tracking-[0.18em] text-emerald-200">
+              {saveNotice.title}
+            </p>
+            <p className="mt-1 text-sm leading-6 text-emerald-50/90">
+              {saveNotice.message}
+            </p>
+          </div>
+        )}
 
         {/* Selector de Frecuencia */}
         <div className="bg-gym-sidebar border border-gym-border rounded-2xl p-5">
@@ -340,6 +441,19 @@ export default function TrainingPlan() {
                   </div>
                 </div>
 
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={handleSaveRoutine}
+                    className="rounded-xl border border-gym-cyan/30 bg-gym-cyan/10 px-4 py-2 text-xs font-mono uppercase tracking-[0.18em] text-gym-cyan transition-colors hover:bg-gym-cyan/15"
+                  >
+                    Guardar rutina
+                  </button>
+                  <span className="self-center text-xs font-mono uppercase tracking-[0.16em] text-gym-muted">
+                    Guarda la variante elegida antes de empezar el día
+                  </span>
+                </div>
+
                 {activePlan.imc && (
                   <div className="flex items-center gap-2 mt-3 pt-3 border-t border-white/10">
                     <span className="text-gym-muted text-xs font-mono">IMC:</span>
@@ -363,11 +477,16 @@ export default function TrainingPlan() {
                 <p className="text-gym-muted text-xs font-mono px-1">
                   RUTINA SEMANAL · {activePlan.days_per_week} DÍAS
                 </p>
-                {activePlan.days.map(day => (
-                  <WorkoutDayCard key={day.day_number} day={day} planType={activePlan.plan_type} />
-                ))}
-              </div>
-            )}
+                  {activePlan.days.map(day => (
+                    <WorkoutDayCard
+                      key={day.day_number}
+                      day={day}
+                      planType={activePlan.plan_type}
+                      onStartRoutine={handleStartRoutine}
+                    />
+                  ))}
+                </div>
+              )}
 
             {/* Nota al pie */}
             <div className="bg-gym-sidebar border border-gym-border rounded-xl p-4">

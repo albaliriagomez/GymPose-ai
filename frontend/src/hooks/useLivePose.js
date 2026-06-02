@@ -39,10 +39,14 @@ export function useLivePose({
     targetPerArm: curlRepsPerArm,
     isComplete: false,
     feedback: exerciseMode === 'curl'
-      ? 'Inicializando detector de bíceps'
+      ? 'Inicializando detector de biceps'
       : exerciseMode === 'press'
         ? 'Inicializando detector de press militar'
-        : 'Inicializando detector de pose',
+        : exerciseMode === 'core'
+          ? 'Inicializando detector de plank'
+          : exerciseMode === 'manual'
+            ? 'Inicializando modo guia'
+          : 'Inicializando detector de pose',
   })
 
   const squatValidation = useSquatValidator({

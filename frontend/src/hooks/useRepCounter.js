@@ -68,6 +68,12 @@ export function useRepCounter({
       return
     }
 
+    if (exerciseMode === 'manual') {
+      downFramesRef.current = 0
+      upFramesRef.current = 0
+      return
+    }
+
     if (!hasPose) {
       downFramesRef.current = 0
       upFramesRef.current = 0
@@ -132,6 +138,10 @@ export function useRepCounter({
 
       downFramesRef.current = 0
       upFramesRef.current = 0
+      return
+    }
+
+    if (exerciseMode === 'core') {
       return
     }
 

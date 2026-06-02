@@ -1,51 +1,265 @@
-import { useEffect, useRef, useState } from 'react'
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import DashboardLayout from '../components/DashboardLayout'
 import PoseViewport from '../components/training/PoseViewport'
 import TrainingSessionHeader from '../components/training/TrainingSessionHeader'
+import {
+  TRAINING_EXERCISES,
+  TRAINING_EXERCISES_BY_NAME,
+  TRAINING_EXERCISE_GROUPS,
+} from '../data/trainingExercises'
 import { useCameraStream } from '../hooks/useCameraStream'
+import { useHandGesture } from '../hooks/useHandGesture'
 import { useLivePose } from '../hooks/useLivePose'
-import { saveTrainingSession } from '../services/sessionService'
-
-const EXERCISE_OPTIONS = {
-  squat: {
-    label: 'Sentadilla',
-    shortLabel: 'Sentadilla',
-    description: 'Piernas, cadera y torso',
-    repLabel: 'sentadilla',
-  },
-  press: {
-    label: 'Press militar',
-    shortLabel: 'Press',
-    description: 'Hombros, codos y control del torso',
-    repLabel: 'press militar',
-  },
-  curl: {
-    label: 'Bíceps',
-    shortLabel: 'Bíceps',
-    description: 'Brazo izquierdo y derecho por separado',
-    repLabel: 'curl de bíceps',
-  },
-}
+import {
+  completeRoutineSet,
+  completeRoutineDay,
+  getCurrentTrainingState,
+  getRoutineProgress,
+  startRoutineDay,
+  recordRoutineReps,
+} from '../services/trainingService'
 
 const ARM_LABELS = {
   left: 'izquierdo',
   right: 'derecho',
 }
 
+const DEFAULT_EXERCISE_NAME = 'Sentadilla con Barra'
+
+const normalizeTrainingPlan = (planPayload) => {
+  if (!planPayload) return null
+  if (planPayload.days) return planPayload
+  if (planPayload.plan?.days) return planPayload.plan
+  return null
+}
+
+const getExerciseDisplayName = (exercise) =>
+  exercise?.name || exercise?.exercise_name || exercise?.exerciseName || 'Ejercicio'
+
+const getExerciseDisplayGroup = (exercise) =>
+  exercise?.muscle_group || exercise?.muscleGroup || 'Ejercicio del plan'
+
+const normalizeExerciseLabel = (value) => String(value || '').trim().toLowerCase()
+
 export default function Training() {
+  const location = useLocation()
   const videoRef = useRef(null)
   const canvasRef = useRef(null)
   const lastFeedbackRef = useRef('')
   const lastRepCountRef = useRef(0)
   const lastCompletionRef = useRef(false)
-  const sessionStartRef = useRef(null)
+  const lastSyncedRoutineExerciseRef = useRef('')
+  const lastCompletedSetRef = useRef('')
+  const lastCompletedDayRef = useRef('')
+  const hasManualExerciseSelectionRef = useRef(false)
+  const plankTimerRef = useRef(null)
+  const token = localStorage.getItem('gympose_token')
 
   const [isSessionLive, setIsSessionLive] = useState(false)
   const [notice, setNotice] = useState(null)
-  const [exerciseMode, setExerciseMode] = useState('squat')
+  const [selectedRoutineDay, setSelectedRoutineDay] = useState(location.state?.routineDay || null)
+  const [selectedRoutineDayId, setSelectedRoutineDayId] = useState(
+    location.state?.routineDayId || location.state?.routineDay?.day_id || location.state?.routineDay?.id || location.state?.routineDay?.day_number || null,
+  )
+  const [exerciseName, setExerciseName] = useState(() => {
+    const routineDay = location.state?.routineDay || null
+    const firstExerciseName = routineDay?.exercises?.[0]?.name
+    return TRAINING_EXERCISES_BY_NAME[firstExerciseName]?.name || DEFAULT_EXERCISE_NAME
+  })
   const [curlStartArm, setCurlStartArm] = useState('left')
   const [curlRepsPerArm, setCurlRepsPerArm] = useState(10)
-  const [savedReps, setSavedReps] = useState(0)
+  const [plankSeconds, setPlankSeconds] = useState(0)
+  const [plankStarted, setPlankStarted] = useState(false)
+  const [exerciseFilter, setExerciseFilter] = useState('')
+  const [exerciseTypeFilter, setExerciseTypeFilter] = useState('all')
+  const [exerciseCategoryFilter, setExerciseCategoryFilter] = useState('Todas')
+  const showExerciseCatalog = false
+  const [routineProgress, setRoutineProgress] = useState(null)
+  const [routineLoading, setRoutineLoading] = useState(false)
+  const [routineError, setRoutineError] = useState(null)
+  const [isCompletingRoutine, setIsCompletingRoutine] = useState(false)
+  const [selectedTrainingPlan, setSelectedTrainingPlan] = useState(location.state?.trainingPlan || null)
+  const [hasBootstrappedRoutine, setHasBootstrappedRoutine] = useState(false)
+
+  useEffect(() => {
+    if (selectedTrainingPlan) return
+
+    const cachedPlan = localStorage.getItem('gympose_training_plan')
+    if (!cachedPlan) return
+
+    try {
+      const parsed = JSON.parse(cachedPlan)
+      const normalizedPlan = normalizeTrainingPlan(parsed)
+      if (normalizedPlan) {
+        setSelectedTrainingPlan(normalizedPlan)
+      }
+    } catch {
+      localStorage.removeItem('gympose_training_plan')
+    }
+  }, [selectedTrainingPlan])
+
+  const activeExercise =
+    TRAINING_EXERCISES_BY_NAME[exerciseName] ||
+    TRAINING_EXERCISES_BY_NAME[DEFAULT_EXERCISE_NAME] ||
+    TRAINING_EXERCISES[0]
+  const trackingMode = activeExercise.trackingMode
+  const isManualExercise = trackingMode === 'manual'
+  const isPlankExercise = activeExercise.name === 'Plank'
+
+  const filteredExerciseGroups = useMemo(() => {
+    const query = exerciseFilter.trim().toLowerCase()
+
+    return TRAINING_EXERCISE_GROUPS
+      .map((group) => ({
+        ...group,
+        items: group.items.filter((item) => {
+          const searchable = `${item.name} ${item.category} ${item.liveLabel} ${item.description}`.toLowerCase()
+          const matchesQuery = !query || searchable.includes(query)
+          const matchesType = exerciseTypeFilter === 'all' || item.trackingMode === exerciseTypeFilter
+          const matchesCategory = exerciseCategoryFilter === 'Todas' || item.category === exerciseCategoryFilter
+          return matchesQuery && matchesType && matchesCategory
+        }),
+      }))
+      .filter((group) => group.items.length > 0)
+  }, [exerciseCategoryFilter, exerciseFilter, exerciseTypeFilter])
+
+  const categoryOptions = useMemo(
+    () => ['Todas', ...TRAINING_EXERCISE_GROUPS.map((group) => group.category)],
+    [],
+  )
+
+  const savedRoutineDays = Array.isArray(selectedTrainingPlan?.days) ? selectedTrainingPlan.days : []
+  const routineDayState = routineProgress?.current_day || routineProgress?.currentDay || null
+  const routineCurrentExerciseState = routineDayState?.current_exercise || routineDayState?.currentExercise || null
+  const routineCurrentExerciseName =
+    routineCurrentExerciseState?.name ||
+    routineCurrentExerciseState?.exercise_name ||
+    routineCurrentExerciseState?.exerciseName ||
+    null
+  const planRoutineDay = selectedRoutineDay || savedRoutineDays[0] || null
+  const routineExercises = Array.isArray((routineDayState || planRoutineDay)?.exercises)
+    ? (routineDayState || planRoutineDay).exercises
+    : []
+  const routineExerciseEntries = Array.isArray(routineDayState?.exercises)
+    ? routineDayState.exercises
+    : routineExercises
+  const activeRoutineDay = routineDayState || planRoutineDay
+  const routineWeekDays = savedRoutineDays.slice(0, 7)
+  const routineTodayLabel = activeRoutineDay?.day_name || activeRoutineDay?.day_label || 'Rutina de hoy'
+  const activeRoutineExerciseProgress =
+    routineCurrentExerciseState ||
+    routineExerciseEntries.find((entry) => {
+      const entryName = entry?.name || entry?.exercise_name
+      return entryName && entryName === routineCurrentExerciseName
+    }) ||
+    null
+  const currentSetValue =
+    activeRoutineExerciseProgress?.current_set ??
+    activeRoutineExerciseProgress?.currentSet ??
+    activeRoutineExerciseProgress?.set_number ??
+    activeRoutineExerciseProgress?.setNumber ??
+    null
+  const setsTargetValue =
+    activeRoutineExerciseProgress?.sets_target ??
+    activeRoutineExerciseProgress?.setsTarget ??
+    activeRoutineExerciseProgress?.sets ??
+    null
+  const repsCompletedValue =
+    activeRoutineExerciseProgress?.reps_completed_current_set ??
+    activeRoutineExerciseProgress?.repsCompletedCurrentSet ??
+    activeRoutineExerciseProgress?.reps_completed ??
+    0
+  const repsTargetValue =
+    activeRoutineExerciseProgress?.reps_target_value ??
+    activeRoutineExerciseProgress?.repsTargetValue ??
+    activeRoutineExerciseProgress?.reps_target ??
+    activeRoutineExerciseProgress?.reps ??
+    null
+  const routineStatus = routineDayState?.status || routineCurrentExerciseState?.status || null
+  const isRoutineActive = routineStatus === 'in_progress'
+  const isRoutineCompleted = routineStatus === 'completed'
+
+  const hydrateRoutineFromResponse = useCallback((data) => {
+    if (!data) return null
+
+    const plan = data.plan || data.training_plan || data.active_plan || data.current_plan || null
+    const normalizedPlan = normalizeTrainingPlan(plan)
+    const currentDay =
+      data.current_day ||
+      data.currentDay ||
+      data.day ||
+      data.current_routine_day ||
+      null
+    const currentDayId =
+      currentDay?.day_id ||
+      currentDay?.id ||
+      currentDay?.day_number ||
+      data.day_id ||
+      data.dayId ||
+      null
+
+    if (normalizedPlan) {
+      setSelectedTrainingPlan(normalizedPlan)
+    }
+
+    if (currentDay) {
+      setSelectedRoutineDay(currentDay)
+    }
+
+    if (currentDayId != null) {
+      setSelectedRoutineDayId(currentDayId)
+    }
+
+    setRoutineProgress(data)
+
+    const backendExerciseName =
+      currentDay?.current_exercise?.name ||
+      currentDay?.current_exercise?.exercise_name ||
+      currentDay?.currentExercise?.name ||
+      currentDay?.currentExercise?.exercise_name ||
+      null
+
+    if (backendExerciseName) {
+      const normalized = TRAINING_EXERCISES_BY_NAME[backendExerciseName]
+      setExerciseName(normalized?.name || backendExerciseName)
+      hasManualExerciseSelectionRef.current = false
+    }
+
+    return { plan: normalizedPlan, currentDay, currentDayId }
+  }, [])
+
+  const loadRoutineProgress = useCallback(async (dayId) => {
+    if (!dayId || !token) return null
+
+    setRoutineLoading(true)
+    setRoutineError(null)
+    try {
+      const data = await getRoutineProgress(token, dayId)
+      return hydrateRoutineFromResponse(data)
+    } catch (error) {
+      setRoutineError(error.response?.data?.detail || 'No se pudo cargar el progreso de la rutina')
+      return null
+    } finally {
+      setRoutineLoading(false)
+    }
+  }, [hydrateRoutineFromResponse, token])
+
+  const loadCurrentTrainingState = useCallback(async () => {
+    if (!token) return null
+
+    setRoutineLoading(true)
+    setRoutineError(null)
+    try {
+      const data = await getCurrentTrainingState(token)
+      return hydrateRoutineFromResponse(data)
+    } catch (error) {
+      setRoutineError(error.response?.data?.detail || 'No se pudo cargar la rutina actual')
+      return null
+    } finally {
+      setRoutineLoading(false)
+    }
+  }, [hydrateRoutineFromResponse, token])
 
   const {
     status: cameraStatus,
@@ -55,6 +269,96 @@ export default function Training() {
     isActive: isCameraActive,
     isStarting,
   } = useCameraStream(videoRef)
+
+  useEffect(() => {
+    if (!token) return
+    if (selectedRoutineDayId) return
+    if (hasBootstrappedRoutine) return
+
+    let cancelled = false
+
+    const bootstrapCurrentRoutine = async () => {
+      setHasBootstrappedRoutine(true)
+      const result = await loadCurrentTrainingState()
+      if (cancelled || !result) return
+
+      if (result.currentDayId != null) {
+        setSelectedRoutineDayId(result.currentDayId)
+      }
+
+      if (result.currentDay) {
+        setSelectedRoutineDay(result.currentDay)
+      }
+    }
+
+    bootstrapCurrentRoutine()
+
+    return () => {
+      cancelled = true
+    }
+  }, [hasBootstrappedRoutine, loadCurrentTrainingState, selectedRoutineDayId, token])
+
+  useEffect(() => {
+    if (!routineCurrentExerciseName || hasManualExerciseSelectionRef.current) return
+
+    const nextExerciseName = TRAINING_EXERCISES_BY_NAME[routineCurrentExerciseName]?.name || routineCurrentExerciseName
+    if (nextExerciseName !== exerciseName) {
+      setExerciseName(nextExerciseName)
+    }
+
+    if (lastSyncedRoutineExerciseRef.current !== nextExerciseName) {
+      lastSyncedRoutineExerciseRef.current = nextExerciseName
+      lastRepCountRef.current = 0
+      lastCompletedSetRef.current = ''
+    }
+  }, [exerciseName, routineCurrentExerciseName])
+
+  useEffect(() => {
+    if (routineDayState || selectedRoutineDayId || !savedRoutineDays.length) {
+      return
+    }
+
+    const firstDay = savedRoutineDays[0]
+    if (!firstDay) return
+
+    setSelectedRoutineDay(firstDay)
+    setSelectedRoutineDayId(firstDay.day_id || firstDay.id || firstDay.day_number || null)
+  }, [routineDayState, savedRoutineDays, selectedRoutineDayId])
+
+  const handleSelectRoutineDay = (day) => {
+    if (!day) return
+    setSelectedRoutineDay(day)
+    const nextDayId = day.day_id || day.id || day.day_number || null
+    setSelectedRoutineDayId(nextDayId)
+    hasManualExerciseSelectionRef.current = false
+
+    if (nextDayId) {
+      void loadRoutineProgress(nextDayId)
+    }
+  }
+
+  const handleStartRoutine = async () => {
+    if (!selectedRoutineDayId || !token) return
+
+    try {
+      setRoutineLoading(true)
+      setRoutineError(null)
+      const data = await startRoutineDay(token, selectedRoutineDayId)
+      hydrateRoutineFromResponse(data)
+
+      setNotice({
+        tone: 'success',
+        title: 'Rutina iniciada',
+        message: 'El progreso diario quedó en estado activo.',
+      })
+    } catch (error) {
+      setRoutineError(error.response?.data?.detail || 'No se pudo iniciar la rutina')
+    } finally {
+      setRoutineLoading(false)
+    }
+  }
+
+  const shouldTrackHands = isPlankExercise && isSessionLive && isCameraActive
 
   const {
     status: poseStatus,
@@ -67,22 +371,28 @@ export default function Training() {
     videoRef,
     canvasRef,
     isRunning: isSessionLive && isCameraActive,
-    exerciseMode,
+    exerciseMode: trackingMode,
     curlArmSide: curlStartArm,
     curlRepsPerArm,
+  })
+
+  const {
+    error: handError,
+    isOkGesture,
+    gestureConfidence,
+  } = useHandGesture({
+    videoRef,
+    isRunning: shouldTrackHands,
   })
 
   async function handleToggleSession() {
     if (isSessionLive) {
       setIsSessionLive(false)
       stopCamera()
-      sessionStartRef.current = null
       return
     }
+
     const started = await startCamera()
-    if (started) {
-      sessionStartRef.current = Date.now()
-    }
     setIsSessionLive(started)
   }
 
@@ -93,77 +403,176 @@ export default function Training() {
     poseStatus,
     isSessionLive,
     hasPose: insights.hasPose,
+    exerciseLabel: activeExercise.name,
   })
 
-  // Reset al cambiar ejercicio
   useEffect(() => {
     lastFeedbackRef.current = ''
     lastRepCountRef.current = 0
     lastCompletionRef.current = false
-    setSavedReps(0)
+    queueMicrotask(() => setPlankSeconds(0))
+    queueMicrotask(() => setPlankStarted(false))
+    if (plankTimerRef.current) {
+      window.clearInterval(plankTimerRef.current)
+      plankTimerRef.current = null
+    }
     queueMicrotask(() => setNotice(null))
-  }, [exerciseMode, curlStartArm, curlRepsPerArm])
+  }, [exerciseName, curlStartArm, curlRepsPerArm, trackingMode])
 
-  // Feedback postural
+  useEffect(() => {
+    if (!isPlankExercise || !isSessionLive || !isCameraActive || !plankStarted) {
+      if (plankTimerRef.current) {
+        window.clearInterval(plankTimerRef.current)
+        plankTimerRef.current = null
+      }
+      return undefined
+    }
+
+    plankTimerRef.current = window.setInterval(() => {
+      setPlankSeconds((current) => current + 1)
+    }, 1000)
+
+    return () => {
+      if (plankTimerRef.current) {
+        window.clearInterval(plankTimerRef.current)
+        plankTimerRef.current = null
+      }
+    }
+  }, [isCameraActive, isPlankExercise, isSessionLive, plankStarted])
+
+  useEffect(() => {
+    if (!isPlankExercise || !shouldTrackHands) return
+
+    if (isOkGesture && !plankStarted) {
+      queueMicrotask(() => setPlankSeconds(0))
+      queueMicrotask(() => setPlankStarted(true))
+      queueMicrotask(() => {
+        setNotice({
+          tone: 'success',
+          title: 'Señal OK detectada',
+          message: 'Plank activado. Mantén la postura para iniciar el conteo.',
+        })
+      })
+    }
+  }, [isOkGesture, isPlankExercise, plankStarted, shouldTrackHands])
+
   useEffect(() => {
     const feedback = squatValidation?.feedback || insights.feedback || ''
     if (!feedback || feedback === lastFeedbackRef.current) return
+
     lastFeedbackRef.current = feedback
     queueMicrotask(() => {
       setNotice({
         tone: squatValidation?.isValid ? 'success' : 'info',
         title:
-          exerciseMode === 'curl'
+          trackingMode === 'curl'
             ? !squatValidation?.hasRequiredView
               ? 'Bíceps incompletos'
               : squatValidation?.isValid
                 ? 'Curl detectado'
                 : 'Aviso de bíceps'
-            : !squatValidation?.hasRequiredView
-            ? exerciseMode === 'press'
-              ? 'Press incompleto'
-              : 'Cuerpo incompleto'
-            : squatValidation?.isValid
-              ? exerciseMode === 'press'
-                ? 'Press detectado'
-                : 'Sentadilla detectada'
-              : 'Aviso postural',
+            : trackingMode === 'core'
+              ? !squatValidation?.hasRequiredView
+                ? 'Core incompleto'
+                : squatValidation?.isValid
+                  ? 'Plank detectado'
+                  : 'Aviso de core'
+              : !squatValidation?.hasRequiredView
+                ? trackingMode === 'press'
+                  ? 'Press incompleto'
+                  : trackingMode === 'squat'
+                    ? 'Pierna incompleta'
+                    : 'Cuerpo incompleto'
+                : squatValidation?.isValid
+                  ? trackingMode === 'press'
+                    ? 'Press detectado'
+                    : trackingMode === 'squat'
+                      ? 'Sentadilla detectada'
+                      : 'Ejercicio detectado'
+                  : 'Aviso postural',
         message: feedback,
       })
     })
-  }, [exerciseMode, insights.feedback, squatValidation?.feedback, squatValidation?.hasRequiredView, squatValidation?.isValid])
+  }, [insights.feedback, squatValidation?.feedback, squatValidation?.hasRequiredView, squatValidation?.isValid, trackingMode])
 
-  // Guardar repetición en BD cuando sube el contador
   useEffect(() => {
+    if (isManualExercise) return
     if (repCount <= lastRepCountRef.current) return
+
     lastRepCountRef.current = repCount
-
-    const exerciseLabel = EXERCISE_OPTIONS[exerciseMode]?.label || exerciseMode
-    const score = squatValidation?.isValid ? 95.0 : 75.0
-    const duration = sessionStartRef.current
-      ? Math.round((Date.now() - sessionStartRef.current) / 1000)
-      : 30
-
-    saveTrainingSession({
-      exercise: exerciseLabel,
-      score,
-      duration_seconds: duration,
-    }).then(() => {
-      setSavedReps(prev => prev + 1)
-    })
-
     queueMicrotask(() => {
       setNotice({
         tone: 'success',
         title: 'Repetición contabilizada',
-        message: `Llevas ${repCount} repeticiones de ${EXERCISE_OPTIONS[exerciseMode].repLabel}.`,
+        message: `Llevas ${repCount} repeticiones de ${activeExercise.name}.`,
       })
     })
-  }, [exerciseMode, repCount, squatValidation?.isValid])
+  }, [activeExercise.name, isManualExercise, repCount])
 
-  // Completar serie de curl
   useEffect(() => {
-    if (exerciseMode !== 'curl' || !repPlan?.isComplete || lastCompletionRef.current) return
+    if (!selectedRoutineDayId || !token || !isSessionLive || !routineCurrentExerciseState) return
+
+    const currentExerciseKey =
+      routineCurrentExerciseState.id ||
+      routineCurrentExerciseState.exercise_id ||
+      exerciseName
+    const targetReps = Number(repsTargetValue || 0)
+    if (!targetReps || repCount <= 0) return
+
+    const previousCount = lastRepCountRef.current
+    if (repCount <= previousCount) return
+
+    const delta = repCount - previousCount
+    lastRepCountRef.current = repCount
+
+    void recordRoutineReps(token, selectedRoutineDayId, {
+      exercise_id: routineCurrentExerciseState.id || routineCurrentExerciseState.exercise_id || null,
+      exercise_name: exerciseName,
+      current_set: currentSetValue,
+      sets_target: setsTargetValue,
+      reps_delta: delta,
+      reps_completed_current_set: repCount,
+      reps_target_value: targetReps,
+    })
+      .then((data) => {
+        if (data) setRoutineProgress(data)
+      })
+      .catch(() => {})
+
+    if (repCount >= targetReps) {
+      const setKey = `${currentExerciseKey}:${currentSetValue || 1}`
+      if (lastCompletedSetRef.current !== setKey) {
+        lastCompletedSetRef.current = setKey
+        void completeRoutineSet(token, selectedRoutineDayId, {
+          exercise_id: routineCurrentExerciseState.id || routineCurrentExerciseState.exercise_id || null,
+          exercise_name: exerciseName,
+          current_set: currentSetValue,
+          sets_target: setsTargetValue,
+          reps_completed_current_set: repCount,
+          reps_target_value: targetReps,
+        })
+          .then((data) => {
+            if (data) setRoutineProgress(data)
+          })
+          .catch(() => {})
+      }
+    }
+  }, [
+    currentSetValue,
+    exerciseName,
+    isSessionLive,
+    repCount,
+    repsTargetValue,
+    routineCurrentExerciseName,
+    routineCurrentExerciseState,
+    selectedRoutineDayId,
+    setsTargetValue,
+    token,
+  ])
+
+  useEffect(() => {
+    if (trackingMode !== 'curl' || !repPlan?.isComplete || lastCompletionRef.current) return
+
     lastCompletionRef.current = true
     queueMicrotask(() => {
       setNotice({
@@ -172,51 +581,462 @@ export default function Training() {
         message: `Terminaste ${curlRepsPerArm} con el ${ARM_LABELS[curlStartArm]} y ${curlRepsPerArm} con el otro brazo.`,
       })
     })
-  }, [curlRepsPerArm, curlStartArm, exerciseMode, repPlan?.isComplete])
+  }, [curlRepsPerArm, curlStartArm, repPlan?.isComplete, trackingMode])
+
+  useEffect(() => {
+    if (!token || !selectedRoutineDayId || !selectedTrainingPlan) return
+    if (!routineExerciseEntries.length) return
+    if (!routineExerciseEntries.every((exercise) => exercise.status === 'completed')) return
+
+    const dayKey = `${selectedRoutineDayId}:${activeRoutineDay?.day_number || ''}`
+    if (lastCompletedDayRef.current === dayKey) return
+    lastCompletedDayRef.current = dayKey
+
+    void completeRoutineDay(token, selectedRoutineDayId, {
+      completed_exercises_count: routineExerciseEntries.length,
+      total_exercises: routineExerciseEntries.length,
+    })
+      .then((data) => {
+        if (data) {
+          setRoutineProgress((current) => ({
+            ...current,
+            current_day: data,
+            currentDay: data,
+          }))
+          setNotice({
+            tone: 'success',
+            title: 'Rutina guardada',
+            message: `Se guardó ${activeRoutineDay?.day_name || 'la rutina de hoy'} como completada.`,
+          })
+        }
+      })
+      .catch((error) => {
+        lastCompletedDayRef.current = ''
+        setRoutineError(error.response?.data?.detail || 'No se pudo completar la rutina del día')
+      })
+  }, [activeRoutineDay?.day_name, routineExerciseEntries, selectedRoutineDayId, selectedTrainingPlan, token])
+
+  const handleCompleteRoutineDay = useCallback(async () => {
+    if (!token || !selectedRoutineDayId || !routineExerciseEntries.length) return
+
+    try {
+      setIsCompletingRoutine(true)
+      setRoutineError(null)
+      const data = await completeRoutineDay(token, selectedRoutineDayId, {
+        completed_exercises_count: routineExerciseEntries.length,
+        total_exercises: routineExerciseEntries.length,
+      })
+
+      if (data) {
+        setRoutineProgress((current) => ({
+          ...current,
+          current_day: data,
+          currentDay: data,
+        }))
+        setNotice({
+          tone: 'success',
+          title: 'Rutina guardada',
+          message: `Se guardó ${activeRoutineDay?.day_name || 'la rutina de hoy'} como completada.`,
+        })
+      }
+    } catch (error) {
+      setRoutineError(error.response?.data?.detail || 'No se pudo completar la rutina del día')
+    } finally {
+      setIsCompletingRoutine(false)
+    }
+  }, [activeRoutineDay?.day_name, routineExerciseEntries.length, selectedRoutineDayId, token])
 
   return (
     <DashboardLayout>
       <div className="mx-auto max-w-6xl space-y-6">
+        {(selectedTrainingPlan || routineWeekDays.length > 0) && (
+          <section className="rounded-3xl border border-gym-cyan/20 bg-gym-sidebar p-4 md:p-5">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div className="max-w-2xl">
+                <p className="text-[10px] font-mono uppercase tracking-[0.28em] text-gym-cyan">
+                  Tu rutina de hoy
+                </p>
+                <h2 className="mt-1 font-display text-2xl font-bold text-white">
+                  {routineTodayLabel}
+                </h2>
+                <p className="mt-2 text-sm leading-6 text-gym-muted">
+                  {activeRoutineDay?.focus || 'Aquí ves el día activo de tu plan y lo que toca en la semana.'}
+                </p>
+                {selectedTrainingPlan && (
+                  <p className="mt-2 text-xs font-mono uppercase tracking-[0.18em] text-gym-muted">
+                    {selectedTrainingPlan.plan_type || 'Plan'} · Variante {selectedTrainingPlan.variant || selectedTrainingPlan.selectedVariant || 'A'} · {selectedTrainingPlan.frequency_level || selectedTrainingPlan.frequency || 'media'}
+                  </p>
+                )}
+              </div>
 
-        {/* Selector de ejercicio */}
+              <div className="grid gap-2 sm:grid-cols-2 lg:w-[24rem]">
+                {[
+                  {
+                    label: 'Día actual',
+                    value: activeRoutineDay?.day_number ? `D${activeRoutineDay.day_number}` : 'Pendiente',
+                    tone: 'text-gym-cyan',
+                  },
+                  {
+                    label: 'Ejercicios hoy',
+                    value: routineExerciseEntries.length || routineWeekDays[0]?.exercises?.length || 0,
+                    tone: 'text-white',
+                  },
+                ].map((item) => (
+                  <div key={item.label} className="rounded-2xl border border-gym-border bg-gym-accent px-4 py-3">
+                    <p className="text-[10px] font-mono uppercase tracking-[0.18em] text-gym-muted">{item.label}</p>
+                    <p className={`mt-1 font-display text-2xl font-bold ${item.tone}`}>{item.value}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {routineWeekDays.length > 0 && (
+              <div className="mt-4">
+                <p className="text-[10px] font-mono uppercase tracking-[0.24em] text-gym-cyan">
+                  Semana de entrenamiento
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {routineWeekDays.map((day) => {
+                    const isActive = Number(activeRoutineDay?.day_number) === Number(day.day_number)
+                    return (
+                      <button
+                        key={day.day_number}
+                        type="button"
+                        onClick={() => handleSelectRoutineDay(day)}
+                        className={`rounded-full border px-3 py-1.5 text-xs font-mono uppercase tracking-[0.18em] transition-colors ${
+                          isActive
+                            ? 'border-gym-cyan bg-gym-cyan/10 text-white'
+                            : 'border-gym-border bg-gym-accent text-gym-muted hover:border-gym-cyan/40 hover:text-white'
+                        }`}
+                      >
+                        D{day.day_number} · {day.day_name || `Día ${day.day_number}`}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+          </section>
+        )}
+
+        {activeRoutineDay && (
+          <section className="rounded-3xl border border-gym-cyan/20 bg-gym-sidebar p-4">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <p className="text-[10px] font-mono uppercase tracking-[0.28em] text-gym-cyan">
+                  Rutina diaria
+                </p>
+                <h2 className="mt-1 font-display text-2xl font-bold text-white">
+                  {activeRoutineDay.day_name || activeRoutineDay.day_label || 'Rutina del día'}
+                </h2>
+                <p className="mt-2 text-sm text-gym-muted">
+                  {activeRoutineDay.focus || 'Ejercicios del plan listos para empezar'}
+                </p>
+                {selectedTrainingPlan && (
+                  <p className="mt-2 text-xs font-mono uppercase tracking-[0.18em] text-gym-muted">
+                    {selectedTrainingPlan.plan_type || 'Plan'} · Variante {selectedTrainingPlan.variant || selectedTrainingPlan.selectedVariant || 'A'}
+                  </p>
+                )}
+              </div>
+              <div className="rounded-2xl border border-gym-border bg-gym-accent px-4 py-3 text-sm text-white">
+                <div className="text-[10px] font-mono uppercase tracking-[0.2em] text-gym-muted">Sesión</div>
+                <div className="mt-1 font-semibold">
+                  {routineCurrentExerciseName
+                    ? routineCurrentExerciseName
+                    : `${routineExerciseEntries.length} ejercicios`}
+                </div>
+                <div className="mt-2 space-y-1 text-[10px] font-mono uppercase tracking-[0.16em] text-gym-muted">
+                  <p>{isRoutineCompleted ? 'Completada' : isRoutineActive ? 'En progreso' : 'Pendiente'}</p>
+                  {currentSetValue != null && setsTargetValue != null && (
+                    <p>Serie {currentSetValue}/{setsTargetValue}</p>
+                  )}
+                  {repsTargetValue != null && (
+                    <p>Reps {repsCompletedValue}/{repsTargetValue}</p>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4 rounded-2xl border border-gym-border bg-gym-accent/70 px-4 py-3">
+              <p className="text-[10px] font-mono uppercase tracking-[0.24em] text-gym-cyan">
+                Debes completar hoy
+              </p>
+              <p className="mt-1 text-sm text-gym-muted">
+                {routineExerciseEntries.length} ejercicios en {activeRoutineDay.day_name || `Día ${activeRoutineDay.day_number || ''}`}.
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {routineExerciseEntries.map((exercise, index) => (
+                  <span
+                    key={`${activeRoutineDay.day_label || activeRoutineDay.day_name || 'day'}-${index}-${getExerciseDisplayName(exercise)}`}
+                    className="rounded-full border border-gym-border bg-gym-sidebar px-3 py-1.5 text-xs font-mono uppercase tracking-[0.16em] text-gym-muted"
+                  >
+                    {getExerciseDisplayName(exercise)}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={handleStartRoutine}
+                disabled={!selectedRoutineDayId || routineLoading || isRoutineActive || isRoutineCompleted}
+                className="rounded-xl border border-gym-cyan/30 bg-gym-cyan/10 px-4 py-2 text-xs font-mono uppercase tracking-[0.18em] text-gym-cyan transition-colors disabled:cursor-not-allowed disabled:opacity-50 hover:bg-gym-cyan/15"
+              >
+                {isRoutineCompleted ? 'Rutina completada' : isRoutineActive ? 'Rutina en progreso' : 'Iniciar rutina diaria'}
+              </button>
+              <button
+                type="button"
+                onClick={handleCompleteRoutineDay}
+                disabled={!token || !selectedRoutineDayId || !routineExerciseEntries.length || isRoutineCompleted || isCompletingRoutine}
+                className="rounded-xl border border-gym-border bg-gym-accent px-4 py-2 text-xs font-mono uppercase tracking-[0.18em] text-gym-muted transition-colors disabled:cursor-not-allowed disabled:opacity-50 hover:border-gym-cyan/40 hover:text-white"
+              >
+                {isCompletingRoutine ? 'Guardando...' : 'Guardar completada'}
+              </button>
+              {routineLoading && (
+                <span className="text-xs font-mono uppercase tracking-[0.18em] text-gym-muted">Sincronizando progreso...</span>
+              )}
+              {routineError && (
+                <span className="text-xs font-mono uppercase tracking-[0.18em] text-red-400">{routineError}</span>
+              )}
+            </div>
+
+            {savedRoutineDays.length > 0 && (
+              <div className="mt-4 flex flex-wrap gap-2">
+                {savedRoutineDays.map((day) => {
+                  const isActive = Number(activeRoutineDay.day_number) === Number(day.day_number)
+                  return (
+                    <button
+                      key={day.day_number}
+                      type="button"
+                      onClick={() => handleSelectRoutineDay(day)}
+                      className={`rounded-full border px-3 py-1.5 text-xs font-mono uppercase tracking-[0.18em] transition-colors ${
+                        isActive
+                          ? 'border-gym-cyan bg-gym-cyan/10 text-white'
+                          : 'border-gym-border bg-gym-accent text-gym-muted hover:border-gym-cyan/40 hover:text-white'
+                      }`}
+                    >
+                      D{day.day_number} · {day.day_name || `Día ${day.day_number}`}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+
+            <div className="mt-4">
+              <p className="text-[10px] font-mono uppercase tracking-[0.24em] text-gym-cyan">
+                Detalle del ejercicio activo
+              </p>
+            </div>
+            <div className="mt-3 grid max-h-72 gap-2 overflow-y-auto pr-1 sm:grid-cols-2 xl:grid-cols-3">
+              {routineExerciseEntries.map((exercise, index) => (
+                (() => {
+                  const displayName = getExerciseDisplayName(exercise)
+                  const isSelected = normalizeExerciseLabel(displayName) === normalizeExerciseLabel(exerciseName)
+                  const isCurrentDayExercise =
+                    normalizeExerciseLabel(displayName) === normalizeExerciseLabel(routineCurrentExerciseName)
+                  const isActiveExercise = isSelected
+                  const isCurrentExerciseOnly = !isSelected && isCurrentDayExercise
+
+                  return (
+                <button
+                  key={`${activeRoutineDay.day_label || activeRoutineDay.day_name || 'day'}-${index}-${displayName}`}
+                  type="button"
+                  onClick={() => {
+                    hasManualExerciseSelectionRef.current = true
+                    const normalized = TRAINING_EXERCISES_BY_NAME[displayName]
+                    if (normalized) {
+                      setExerciseName(normalized.name)
+                    } else {
+                      setExerciseName(displayName)
+                    }
+                  }}
+                  aria-pressed={isActiveExercise}
+                  className={`rounded-2xl border px-3 py-3 text-left transition-all ${
+                    isActiveExercise
+                      ? 'relative scale-[1.01] border-gym-cyan bg-gym-cyan/15 text-white shadow-[0_0_0_1px_rgba(0,229,255,0.35),0_0_30px_rgba(0,229,255,0.18)] ring-1 ring-gym-cyan/30'
+                      : isCurrentExerciseOnly
+                        ? 'border-gym-cyan/40 bg-gym-accent/90 text-white shadow-[0_0_0_1px_rgba(0,229,255,0.12)]'
+                      : 'border-gym-border bg-gym-accent text-gym-muted hover:border-gym-cyan/40 hover:text-white'
+                  }`}
+                >
+                  {(isActiveExercise || isCurrentExerciseOnly) && (
+                    <span className="absolute left-0 top-0 h-full w-1 rounded-l-2xl bg-gym-cyan shadow-[0_0_16px_rgba(0,229,255,0.6)]" />
+                  )}
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="truncate text-sm font-semibold text-white">
+                          {displayName}
+                        </p>
+                        {isActiveExercise && (
+                          <span className="shrink-0 rounded-full border border-gym-cyan/40 bg-gym-cyan px-1.5 py-0.5 text-[9px] font-mono uppercase tracking-[0.18em] text-black">
+                            Seleccionado
+                          </span>
+                        )}
+                        {isCurrentExerciseOnly && (
+                          <span className="shrink-0 rounded-full border border-gym-cyan/30 bg-gym-cyan/10 px-1.5 py-0.5 text-[9px] font-mono uppercase tracking-[0.18em] text-gym-cyan">
+                            Actual
+                          </span>
+                        )}
+                      </div>
+                      <p className={`mt-1 text-[10px] font-mono uppercase tracking-[0.16em] ${isActiveExercise || isCurrentExerciseOnly ? 'text-gym-cyan/90' : 'text-gym-muted'}`}>
+                        {getExerciseDisplayGroup(exercise)}
+                      </p>
+                    </div>
+                    {(exercise.sets || exercise.reps) && (
+                      <div className={`flex flex-col items-end text-[10px] font-mono uppercase tracking-[0.16em] ${isActiveExercise || isCurrentExerciseOnly ? 'text-gym-cyan' : 'text-gym-cyan'}`}>
+                        {exercise.sets && <span>{exercise.sets} series</span>}
+                        {exercise.reps && <span>{exercise.reps} reps</span>}
+                      </div>
+                    )}
+                  </div>
+                </button>
+                  )
+                })()
+              ))}
+            </div>
+          </section>
+        )}
+
+        {showExerciseCatalog && (
         <div className="rounded-3xl border border-gym-border bg-gym-sidebar p-4">
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div>
+          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <div className="min-w-[220px]">
               <p className="text-[10px] font-mono uppercase tracking-[0.28em] text-gym-cyan">
                 Selecciona el ejercicio
               </p>
               <h2 className="mt-1 font-display text-2xl font-bold text-white">
                 Modo de entrenamiento
               </h2>
+              <p className="mt-2 max-w-md text-sm leading-6 text-gym-muted">
+                Usa el filtro para reducir la lista. Los ejercicios con <span className="text-white">Live</span> tienen seguimiento en cámara.
+              </p>
             </div>
-            <div className="flex flex-wrap gap-2">
-              {Object.entries(EXERCISE_OPTIONS).map(([mode, config]) => {
-                const active = exerciseMode === mode
-                return (
+
+            <div className="w-full max-w-4xl space-y-3">
+              <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+                <label className="block">
+                  <span className="mb-1 block text-[10px] font-mono uppercase tracking-[0.2em] text-gym-muted">
+                    Filtro rápido
+                  </span>
+                  <input
+                    value={exerciseFilter}
+                    onChange={(event) => setExerciseFilter(event.target.value)}
+                    placeholder="Busca por nombre, grupo o tipo..."
+                    className="w-full rounded-2xl border border-gym-border bg-gym-accent px-4 py-3 text-sm text-white outline-none transition-colors placeholder:text-gym-muted focus:border-gym-cyan"
+                  />
+                </label>
+                <div className="grid grid-cols-2 gap-2 sm:self-end">
                   <button
-                    key={mode}
-                    onClick={() => setExerciseMode(mode)}
-                    className={`rounded-2xl border px-4 py-3 text-left transition-all ${
-                      active
-                        ? 'border-gym-cyan bg-gym-cyan/10 text-white shadow-[0_0_25px_rgba(0,229,255,0.18)]'
-                        : 'border-gym-border bg-gym-accent text-gym-muted hover:border-gym-cyan/30 hover:text-white'
+                    type="button"
+                    onClick={() => setExerciseTypeFilter('all')}
+                    className={`rounded-2xl border px-3 py-3 text-xs font-mono uppercase tracking-[0.18em] transition-colors ${
+                      exerciseTypeFilter === 'all'
+                        ? 'border-gym-cyan bg-gym-cyan/10 text-white'
+                        : 'border-gym-border bg-gym-accent text-gym-muted hover:border-gym-cyan/40 hover:text-white'
                     }`}
                   >
-                    <div className="text-sm font-display font-bold">{config.shortLabel}</div>
-                    <div className="mt-0.5 text-[10px] font-mono uppercase tracking-[0.2em] opacity-80">
-                      {config.description}
-                    </div>
+                    Todos
                   </button>
-                )
-              })}
+                  <button
+                    type="button"
+                    onClick={() => setExerciseTypeFilter('manual')}
+                    className={`rounded-2xl border px-3 py-3 text-xs font-mono uppercase tracking-[0.18em] transition-colors ${
+                      exerciseTypeFilter === 'manual'
+                        ? 'border-amber-500/40 bg-amber-500/10 text-amber-200'
+                        : 'border-gym-border bg-gym-accent text-gym-muted hover:border-amber-400/40 hover:text-white'
+                    }`}
+                  >
+                    Guía
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-2 overflow-x-auto pb-1">
+                {categoryOptions.map((category) => {
+                  const active = exerciseCategoryFilter === category
+                  return (
+                    <button
+                      key={category}
+                      type="button"
+                      onClick={() => setExerciseCategoryFilter(category)}
+                      className={`shrink-0 rounded-full border px-3 py-1.5 text-[10px] font-mono uppercase tracking-[0.18em] transition-colors ${
+                        active
+                          ? 'border-gym-cyan bg-gym-cyan/10 text-white'
+                          : 'border-gym-border bg-gym-accent text-gym-muted hover:border-gym-cyan/30 hover:text-white'
+                      }`}
+                    >
+                      {category}
+                    </button>
+                  )
+                })}
+              </div>
+
+              <div className="rounded-2xl border border-gym-border bg-gym-accent/70 px-4 py-3">
+                <p className="text-xs leading-6 text-gym-muted">
+                  <span className="font-semibold text-white">Modo guía</span> es un ejercicio que aparece en el plan, pero todavía no tiene conteo automático propio.
+                  Sirve como referencia visual mientras el sistema lo sigue de forma manual.
+                </p>
+              </div>
+
+              <div className="max-h-[340px] overflow-y-auto pr-1">
+                {filteredExerciseGroups.length === 0 ? (
+                  <div className="rounded-2xl border border-gym-border bg-gym-accent px-4 py-5 text-sm text-gym-muted">
+                    No hay ejercicios que coincidan con ese filtro.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {filteredExerciseGroups.map((group) => (
+                      <div key={group.category} className="space-y-2">
+                        <p className="text-[10px] font-mono uppercase tracking-[0.26em] text-gym-muted">
+                          {group.category}
+                        </p>
+                        <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                          {group.items.map((item) => {
+                            const active = exerciseName === item.name
+                            return (
+                              <button
+                                key={item.name}
+                                onClick={() => setExerciseName(item.name)}
+                                className={`rounded-xl border px-3 py-2 text-left transition-all ${
+                                  active
+                                    ? 'border-gym-cyan bg-gym-cyan/10 text-white shadow-[0_0_25px_rgba(0,229,255,0.14)]'
+                                    : 'border-gym-border bg-gym-sidebar text-gym-muted hover:border-gym-cyan/30 hover:text-white'
+                                }`}
+                              >
+                                <div className="flex items-center gap-2">
+                                  <div className="min-w-0 flex-1 text-sm font-display font-bold leading-tight">
+                                    {item.name}
+                                  </div>
+                                  <span
+                                    className={`rounded-full border px-1.5 py-0.5 text-[9px] font-mono uppercase tracking-[0.18em] ${
+                                      item.trackingMode === 'manual'
+                                        ? 'border-amber-500/30 bg-amber-500/10 text-amber-200'
+                                        : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
+                                    }`}
+                                  >
+                                    {item.liveLabel}
+                                  </span>
+                                </div>
+                              </button>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
+        )}
 
         <TrainingSessionHeader
           isLive={isSessionLive}
           onToggleSession={handleToggleSession}
-          exerciseLabel={EXERCISE_OPTIONS[exerciseMode].label}
+          exerciseLabel={activeExercise.name}
           disabled={cameraStatus === 'requesting' || isStarting}
         />
 
@@ -228,34 +1048,29 @@ export default function Training() {
             poseError={poseError}
             isLive={isSessionLive}
             statusMessage={statusMessage}
-            exerciseLabel={EXERCISE_OPTIONS[exerciseMode].label}
+            exerciseLabel={activeExercise.name}
           />
 
           <aside className="xl:sticky xl:top-6">
             <section className="rounded-2xl border border-gym-border bg-gym-sidebar px-5 py-4">
               <div className="flex flex-col gap-4">
-
-                {/* Contador de repeticiones */}
-                <div className="rounded-2xl border border-gym-border bg-gym-accent px-4 py-4 text-center">
-                  <p className="text-[10px] font-mono uppercase tracking-[0.2em] text-gym-muted">
-                    Repeticiones
-                  </p>
-                  <p className="mt-2 font-display text-5xl font-bold leading-none text-white">
-                    {repCount}
-                  </p>
-                  {savedReps > 0 && (
-                    <p className="mt-1 text-[10px] font-mono text-gym-green">
-                      ✓ {savedReps} guardadas en tu historial
+                {trackingMode !== 'core' && !isManualExercise && (
+                  <div className="rounded-2xl border border-gym-border bg-gym-accent px-4 py-4 text-center">
+                    <p className="text-[10px] font-mono uppercase tracking-[0.2em] text-gym-muted">
+                      Repeticiones
                     </p>
-                  )}
-                </div>
+                    <p className="mt-2 font-display text-5xl font-bold leading-none text-white">
+                      {repCount}
+                    </p>
+                  </div>
+                )}
 
-                {/* Plan de bíceps */}
-                {exerciseMode === 'curl' && (
+                {trackingMode === 'curl' && (
                   <div className="rounded-2xl border border-gym-border bg-gym-accent px-4 py-4">
                     <p className="text-[10px] font-mono uppercase tracking-[0.2em] text-gym-muted">
                       Plan de bíceps
                     </p>
+
                     <div className="mt-3 grid gap-3">
                       <label className="space-y-1">
                         <span className="block text-[10px] font-mono uppercase tracking-[0.18em] text-gym-muted">
@@ -270,6 +1085,7 @@ export default function Training() {
                           <option value="right">Derecho</option>
                         </select>
                       </label>
+
                       <label className="space-y-1">
                         <span className="block text-[10px] font-mono uppercase tracking-[0.18em] text-gym-muted">
                           Reps por brazo
@@ -283,6 +1099,7 @@ export default function Training() {
                           className="w-full rounded-xl border border-gym-border bg-gym-sidebar px-3 py-2 text-sm text-white outline-none"
                         />
                       </label>
+
                       <p className="text-sm leading-6 text-white">
                         Haz {curlRepsPerArm} con el {ARM_LABELS[curlStartArm]} y luego {curlRepsPerArm} con el otro brazo.
                       </p>
@@ -290,21 +1107,60 @@ export default function Training() {
                   </div>
                 )}
 
-                {/* Progreso curl */}
-                {exerciseMode === 'curl' && (
+                {trackingMode === 'curl' && (
                   <div className="rounded-2xl border border-cyan-400/30 bg-slate-950/88 px-4 py-4">
                     <p className="text-[10px] font-mono uppercase tracking-[0.2em] text-gym-muted">
                       Progreso
                     </p>
                     <div className="mt-2 space-y-2 text-sm text-white">
-                      <p>Brazo actual: <span className="font-semibold">{ARM_LABELS[repPlan?.currentArm || curlStartArm]}</span></p>
-                      <p>En este brazo: <span className="font-semibold">{repPlan?.armRepCount ?? 0}/{curlRepsPerArm}</span></p>
-                      <p>Estado: <span className="font-semibold">{repPlan?.isComplete ? 'Serie completa ✓' : 'En curso'}</span></p>
+                      <p>
+                        Brazo actual: <span className="font-semibold">{ARM_LABELS[repPlan?.currentArm || curlStartArm]}</span>
+                      </p>
+                      <p>
+                        En este brazo: <span className="font-semibold">{repPlan?.armRepCount ?? 0}/{curlRepsPerArm}</span>
+                      </p>
+                      <p>
+                        Estado: <span className="font-semibold">{repPlan?.isComplete ? 'Serie completa' : 'En curso'}</span>
+                      </p>
                     </div>
                   </div>
                 )}
 
-                {/* Feedback */}
+                {isPlankExercise && (
+                  <div className="rounded-2xl border border-gym-border bg-gym-accent px-4 py-4">
+                    <p className="text-[10px] font-mono uppercase tracking-[0.2em] text-gym-muted">
+                      Plan de core
+                    </p>
+                    <div className="mt-2 space-y-2 text-sm text-white">
+                      <p className="text-xs font-mono uppercase tracking-[0.18em] text-gym-cyan">
+                        {plankStarted
+                          ? 'Plank en curso'
+                          : `Haz la señal OK para iniciar (${Math.round(gestureConfidence * 100)}%)`}
+                      </p>
+                      <p className="font-display text-4xl font-bold leading-none text-gym-cyan">
+                        {String(Math.floor(plankSeconds / 60)).padStart(2, '0')}:{String(plankSeconds % 60).padStart(2, '0')}
+                      </p>
+                      <p className="leading-6 text-gym-muted">
+                        Mantén una línea recta desde hombros hasta talones. Usa la cámara para vigilar estabilidad de torso.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {isManualExercise && (
+                  <div className="rounded-2xl border border-gym-border bg-gym-accent px-4 py-4">
+                    <p className="text-[10px] font-mono uppercase tracking-[0.2em] text-gym-muted">
+                      Modo guía
+                    </p>
+                    <p className="mt-2 text-sm leading-6 text-white">
+                      Este ejercicio todavía no tiene conteo automático dedicado. Sigue las series y repeticiones del plan como referencia.
+                    </p>
+                    <p className="mt-2 text-xs font-mono uppercase tracking-[0.18em] text-gym-muted">
+                      Grupo: {activeExercise.category}
+                    </p>
+                  </div>
+                )}
+
                 <div
                   className={`rounded-2xl border px-4 py-4 shadow-[0_20px_50px_rgba(0,0,0,0.28)] transition-all ${
                     notice?.tone === 'success'
@@ -315,31 +1171,19 @@ export default function Training() {
                   aria-live="polite"
                 >
                   <p className="text-[10px] font-mono uppercase tracking-[0.22em] opacity-80">
-                    {notice?.title || `Feedback ${EXERCISE_OPTIONS[exerciseMode].shortLabel.toLowerCase()}`}
+                    {notice?.title || `Feedback ${activeExercise.name.toLowerCase()}`}
                   </p>
                   <div className="mt-3 flex items-start gap-3">
-                    <div className={`mt-1 h-3 w-3 rounded-full flex-shrink-0 ${
-                      notice?.tone === 'success' ? 'bg-emerald-300' : 'bg-cyan-300 animate-pulse'
-                    }`}/>
+                    <div
+                      className={`mt-1 h-3 w-3 rounded-full ${
+                        notice?.tone === 'success' ? 'bg-emerald-300' : 'bg-cyan-300 animate-pulse'
+                      }`}
+                    />
                     <p className="text-sm leading-6 text-white">
-                      {notice?.message || squatValidation?.feedback || insights.feedback || 'Esperando datos de la cámara.'}
+                      {notice?.message || handError || squatValidation?.feedback || insights.feedback || 'Esperando datos de la cámara.'}
                     </p>
                   </div>
                 </div>
-
-                {/* Estado de sesión */}
-                {isSessionLive && (
-                  <div className="rounded-2xl border border-gym-green/20 bg-gym-green/5 px-4 py-3 text-center">
-                    <div className="flex items-center justify-center gap-2">
-                      <div className="w-2 h-2 rounded-full bg-gym-green animate-pulse"/>
-                      <p className="text-xs font-mono text-gym-green">SESIÓN ACTIVA</p>
-                    </div>
-                    <p className="text-gym-muted text-[10px] font-mono mt-1">
-                      Las repeticiones se guardan automáticamente
-                    </p>
-                  </div>
-                )}
-
               </div>
             </section>
           </aside>
@@ -349,10 +1193,30 @@ export default function Training() {
   )
 }
 
-function getStatusMessage({ cameraError, poseError, cameraStatus, poseStatus, isSessionLive, hasPose }) {
-  if (cameraError || poseError) return cameraError || poseError
-  if (!isSessionLive) return 'Pulsa "Iniciar cámara" para comenzar.'
-  if (cameraStatus === 'requesting' || poseStatus === 'loading') return 'Estamos preparando la cámara.'
-  if (hasPose) return 'Te vemos bien en pantalla.'
+function getStatusMessage({
+  cameraError,
+  poseError,
+  cameraStatus,
+  poseStatus,
+  isSessionLive,
+  hasPose,
+  exerciseLabel,
+}) {
+  if (cameraError || poseError) {
+    return cameraError || poseError
+  }
+
+  if (!isSessionLive) {
+    return `Pulsa "Iniciar cámara" para comenzar con ${exerciseLabel}.`
+  }
+
+  if (cameraStatus === 'requesting' || poseStatus === 'loading') {
+    return 'Estamos preparando la cámara.'
+  }
+
+  if (hasPose) {
+    return 'Te vemos bien en pantalla.'
+  }
+
   return 'La cámara está encendida. Ponte frente a ella para comenzar.'
 }

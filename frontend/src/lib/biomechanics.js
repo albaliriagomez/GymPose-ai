@@ -56,11 +56,19 @@ function isLandmarkVisible(landmark, threshold = 0.6) {
 }
 
 function getExerciseConfig(exerciseMode) {
+  if (exerciseMode === 'manual') {
+    return {
+      requiredLandmarks: [],
+      requiredView: 'guide',
+      label: 'ejercicio manual',
+    }
+  }
+
   if (exerciseMode === 'curl') {
     return {
       requiredLandmarks: ARM_REQUIRED_LANDMARKS,
       requiredView: 'arm',
-      label: 'bíceps',
+      label: 'biceps',
     }
   }
 
@@ -69,6 +77,14 @@ function getExerciseConfig(exerciseMode) {
       requiredLandmarks: ARM_REQUIRED_LANDMARKS,
       requiredView: 'arm',
       label: 'press militar',
+    }
+  }
+
+  if (exerciseMode === 'core') {
+    return {
+      requiredLandmarks: SQUAT_REQUIRED_LANDMARKS,
+      requiredView: 'full',
+      label: 'plank',
     }
   }
 
@@ -82,6 +98,25 @@ function getExerciseConfig(exerciseMode) {
 export function buildPoseInsights(poseLandmarkerResult, exerciseMode = 'squat') {
   const pose = poseLandmarkerResult?.landmarks?.[0]
   const config = getExerciseConfig(exerciseMode)
+
+  if (exerciseMode === 'manual') {
+    return {
+      exerciseMode,
+      hasPose: Boolean(pose),
+      requiredView: config.requiredView,
+      hasRequiredView: Boolean(pose),
+      bodyCoverage: 0,
+      kneeAngle: null,
+      torsoAngle: null,
+      elbowAngle: null,
+      leftElbowAngle: null,
+      rightElbowAngle: null,
+      repCount: 0,
+      feedback: pose
+        ? 'Ejercicio manual seleccionado. Sigue el plan del backend como guía.'
+        : 'Ejercicio manual listo. Ponte frente a la cámara si quieres ver tu postura.',
+    }
+  }
 
   if (!pose) {
     return {
@@ -117,7 +152,7 @@ export function buildPoseInsights(poseLandmarkerResult, exerciseMode = 'squat') 
   const visibleLandmarks = config.requiredLandmarks.filter((index) => isLandmarkVisible(pose[index]))
   const bodyCoverage = Number(((visibleLandmarks.length / config.requiredLandmarks.length) * 100).toFixed(0))
   const hasRequiredView =
-    exerciseMode === 'squat'
+    exerciseMode === 'squat' || exerciseMode === 'core'
       ? bodyCoverage >= 75
       : visibleLandmarks.length === config.requiredLandmarks.length
 
@@ -165,6 +200,12 @@ export function buildPoseInsights(poseLandmarkerResult, exerciseMode = 'squat') 
       feedback = 'Torso inclinado. Trata de no balancear el cuerpo.'
     } else {
       feedback = 'Empuja la barra o peso por encima de la cabeza.'
+    }
+  } else if (exerciseMode === 'core') {
+    if (torsoAngle && torsoAngle > 20) {
+      feedback = 'Alinea mejor el torso para sostener el plank.'
+    } else {
+      feedback = 'Plank detectado. Mantén el core firme y la cadera estable.'
     }
   } else {
     if (kneeAngle && kneeAngle < 80) {
