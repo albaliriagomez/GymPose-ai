@@ -14,6 +14,7 @@ class Exercise(BaseModel):
     reps: str           # "8-10" | "30 seg" | "12 c/lado"
     rest_seconds: int
     muscle_group: str
+    mode: Optional[Literal["reps", "timer", "hold"]] = None
     notes: Optional[str] = None
 
 
@@ -78,6 +79,7 @@ class TrainingExerciseProgressItem(BaseModel):
     reps_completed_current_set: int
     current_set: int
     rest_seconds: Optional[int] = None
+    mode: Literal["reps", "timer", "hold"] = "reps"
     status: Literal["pending", "in_progress", "completed"]
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
@@ -91,9 +93,12 @@ class TrainingSessionSummary(BaseModel):
     day_name: str
     total_exercises: int
     completed_exercises: int
+    time_based_exercises: int = 0
     total_sets: int
     completed_sets: int
     total_reps: int
+    total_time_seconds: int = 0
+    completed_time_seconds: int = 0
     progress_pct: float
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
@@ -105,6 +110,8 @@ class TrainingRoutineDayProgressItem(BaseModel):
 
     id: int
     day_id: int
+    routine_id: int
+    plan_day_number: int
     day_number: int
     day_name: str
     status: Literal["pending", "in_progress", "completed"]
@@ -150,4 +157,19 @@ class TrainingRoutineProgressResponse(BaseModel):
 class TrainingRoutineCompleteRequest(BaseModel):
     completed_exercises_count: Optional[int] = Field(None, ge=0)
     total_exercises: Optional[int] = Field(None, ge=0)
+    client_event_id: Optional[UUID] = None
     force: Optional[bool] = Field(False)
+
+
+class TrainingExerciseEventRequest(BaseModel):
+    exercise_id: Optional[int] = None
+    exercise_name: Optional[str] = None
+    exercise_mode: Optional[Literal["reps", "timer", "hold"]] = None
+    tracking_mode: Optional[str] = None
+    current_set: Optional[int] = Field(None, ge=1)
+    sets_target: Optional[int] = Field(None, ge=1)
+    reps_completed_current_set: Optional[int] = Field(None, ge=0)
+    reps_target_value: Optional[int] = Field(None, ge=0)
+    duration_seconds: Optional[int] = Field(None, ge=0)
+    seconds_elapsed: Optional[int] = Field(None, ge=0)
+    client_event_id: Optional[UUID] = None

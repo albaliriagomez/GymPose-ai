@@ -22,9 +22,9 @@ export async function createPoseLandmarker({
       },
       runningMode,
       numPoses,
-      minPoseDetectionConfidence: 0.5,
-      minPosePresenceConfidence: 0.5,
-      minTrackingConfidence: 0.5,
+      minPoseDetectionConfidence: 0.3,
+      minPosePresenceConfidence: 0.3,
+      minTrackingConfidence: 0.3,
       outputSegmentationMasks: false,
     })
   } catch {
@@ -35,9 +35,9 @@ export async function createPoseLandmarker({
       },
       runningMode,
       numPoses,
-      minPoseDetectionConfidence: 0.5,
-      minPosePresenceConfidence: 0.5,
-      minTrackingConfidence: 0.5,
+      minPoseDetectionConfidence: 0.3,
+      minPosePresenceConfidence: 0.3,
+      minTrackingConfidence: 0.3,
       outputSegmentationMasks: false,
     })
   }

@@ -10,6 +10,7 @@ export function useLivePose({
   canvasRef,
   isRunning,
   exerciseMode = 'squat',
+  exerciseLabel = '',
   enablePose = true,
   curlArmSide = 'left',
   curlRepsPerArm = 10,
@@ -18,8 +19,9 @@ export function useLivePose({
   const frameRequestRef = useRef(0)
   const lastVideoTimeRef = useRef(-1)
   const lastUiUpdateRef = useRef(0)
+  const lastInferenceTimeRef = useRef(0)
 
-  const isArmMode = exerciseMode === 'press' || exerciseMode === 'curl'
+  const isArmMode = exerciseMode === 'press' || exerciseMode === 'curl' || exerciseMode === 'russian' || exerciseMode === 'row'
 
   const [status, setStatus] = useState('loading')
   const [error, setError] = useState('')
@@ -34,15 +36,23 @@ export function useLivePose({
     elbowAngle: null,
     leftElbowAngle: null,
     rightElbowAngle: null,
+    dominantArmSide: 'left',
+    dominantElbowAngle: null,
+    wristSpread: null,
+    ankleSpread: null,
+    handsAboveShoulders: false,
+    feetApart: false,
     repCount: 0,
     currentArm: curlArmSide,
     armRepCount: 0,
     targetPerArm: curlRepsPerArm,
     isComplete: false,
     feedback: exerciseMode === 'curl'
-      ? 'Inicializando detector de biceps'
+      ? 'Inicializando detector bilateral de biceps'
       : exerciseMode === 'press'
         ? 'Inicializando detector de press militar'
+        : exerciseMode === 'russian'
+          ? 'Inicializando detector de flexiones rusas'
         : exerciseMode === 'core'
           ? 'Inicializando detector de plank'
           : exerciseMode === 'manual'
@@ -52,11 +62,17 @@ export function useLivePose({
 
   const squatValidation = useSquatValidator({
     exerciseMode,
+    exerciseLabel,
     kneeAngle: insights.kneeAngle,
     torsoAngle: insights.torsoAngle,
     elbowAngle: insights.elbowAngle,
     leftElbowAngle: insights.leftElbowAngle,
     rightElbowAngle: insights.rightElbowAngle,
+    dominantArmSide: insights.dominantArmSide,
+    wristSpread: insights.wristSpread,
+    ankleSpread: insights.ankleSpread,
+    handsAboveShoulders: insights.handsAboveShoulders,
+    feetApart: insights.feetApart,
     curlArmSide,
     hasPose: insights.hasPose,
     hasRequiredView: insights.hasRequiredView,
@@ -66,11 +82,17 @@ export function useLivePose({
 
   const repCounter = useRepCounter({
     exerciseMode,
+    exerciseLabel,
     kneeAngle: insights.kneeAngle,
     torsoAngle: insights.torsoAngle,
     elbowAngle: insights.elbowAngle,
     leftElbowAngle: insights.leftElbowAngle,
     rightElbowAngle: insights.rightElbowAngle,
+    dominantArmSide: insights.dominantArmSide,
+    wristSpread: insights.wristSpread,
+    ankleSpread: insights.ankleSpread,
+    handsAboveShoulders: insights.handsAboveShoulders,
+    feetApart: insights.feetApart,
     curlArmSide,
     curlRepsPerArm,
     hasPose: insights.hasPose,
@@ -153,21 +175,26 @@ export function useLivePose({
 
       resizeCanvasToVideo(canvas, video)
 
-      if (video.currentTime !== lastVideoTimeRef.current) {
-        const result = poseLandmarker.detectForVideo(video, performance.now())
+      const now = performance.now()
+      const shouldRunInference =
+        video.currentTime !== lastVideoTimeRef.current ||
+        now - lastInferenceTimeRef.current >= 33
+
+      if (shouldRunInference) {
+        const result = poseLandmarker.detectForVideo(video, now)
         const ctx = canvas.getContext('2d')
 
         if (ctx) {
           drawPoseLandmarks(ctx, result, canvas.width, canvas.height, exerciseMode)
         }
 
-        const now = performance.now()
         if (now - lastUiUpdateRef.current > 120) {
           setInsights(buildPoseInsights(result, exerciseMode))
           lastUiUpdateRef.current = now
         }
 
         lastVideoTimeRef.current = video.currentTime
+        lastInferenceTimeRef.current = now
       }
 
       frameRequestRef.current = window.requestAnimationFrame(renderFrame)
@@ -192,6 +219,7 @@ export function useLivePose({
     insights: {
       ...insights,
       exerciseMode,
+      exerciseLabel,
       hasPose: isRunning ? insights.hasPose : false,
       requiredView: isArmMode ? 'arm' : 'full',
       repCount: repCounter.repCount,
@@ -199,6 +227,10 @@ export function useLivePose({
       armRepCount: repCounter.armRepCount,
       targetPerArm: repCounter.targetPerArm,
       isComplete: repCounter.isComplete,
+      wristSpread: insights.wristSpread,
+      ankleSpread: insights.ankleSpread,
+      handsAboveShoulders: insights.handsAboveShoulders,
+      feetApart: insights.feetApart,
       validation: squatValidation,
       feedback: squatValidation.feedback || insights.feedback,
     },
@@ -210,6 +242,7 @@ export function useLivePose({
       isComplete: repCounter.isComplete,
     },
     squatValidation,
+    resetRepCounter: repCounter.reset,
     isReady: effectiveStatus === 'ready' || effectiveStatus === 'tracking',
   }
 }

@@ -157,3 +157,4 @@ backend/venv/
 backend/venv31/
 env/
 .venv/
+.qodo

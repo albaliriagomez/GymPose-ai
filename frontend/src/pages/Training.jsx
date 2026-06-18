@@ -3,11 +3,6 @@ import { useLocation } from 'react-router-dom'
 import DashboardLayout from '../components/DashboardLayout'
 import PoseViewport from '../components/training/PoseViewport'
 import TrainingSessionHeader from '../components/training/TrainingSessionHeader'
-import {
-  TRAINING_EXERCISES,
-  TRAINING_EXERCISES_BY_NAME,
-  TRAINING_EXERCISE_GROUPS,
-} from '../data/trainingExercises'
 import { useCameraStream } from '../hooks/useCameraStream'
 import { useHandGesture } from '../hooks/useHandGesture'
 import { useLivePose } from '../hooks/useLivePose'
@@ -20,25 +15,239 @@ import {
   recordRoutineReps,
 } from '../services/trainingService'
 
-const ARM_LABELS = {
-  left: 'izquierdo',
-  right: 'derecho',
-}
-
 const DEFAULT_EXERCISE_NAME = 'Sentadilla con Barra'
 
 const normalizeTrainingPlan = (planPayload) => {
   if (!planPayload) return null
-  if (planPayload.days) return planPayload
-  if (planPayload.plan?.days) return planPayload.plan
-  return null
+  const planEnvelope =
+    planPayload.planSnapshot ||
+    planPayload.selectedPlanSnapshot ||
+    planPayload.training_plan_snapshot ||
+    planPayload.plan_snapshot ||
+    (planPayload.plan?.plan ? planPayload.plan : planPayload)
+  const nestedPlan = planEnvelope.plan?.days ? planEnvelope.plan : null
+  const resolvedPlan = nestedPlan?.plan || planEnvelope.plan || null
+  const days = planEnvelope.days || resolvedPlan?.days || null
+
+  if (!days && !resolvedPlan?.days) return null
+
+  const currentDay = planPayload.current_day || planPayload.currentDay || planEnvelope.current_day || planEnvelope.currentDay || null
+  const planVariant = planEnvelope.plan_variant || planEnvelope.variant || planEnvelope.selectedVariant || planPayload.plan_variant || planPayload.variant || planPayload.selectedVariant || null
+  const frequency = planEnvelope.frequency || planEnvelope.frequency_level || planPayload.frequency || planPayload.frequency_level || null
+
+  return {
+    ...planEnvelope,
+    ...(resolvedPlan || {}),
+    days: days || resolvedPlan?.days || [],
+    plan_type: resolvedPlan?.plan_type || planEnvelope.plan_type || planPayload.plan_type || null,
+    plan_variant: planVariant,
+    variant: planVariant,
+    selectedVariant: planVariant,
+    frequency,
+    frequency_level: planEnvelope.frequency_level || frequency,
+    current_day: currentDay,
+  }
+}
+
+const resolveRoutineDayNumber = (day) => {
+  const rawValue =
+    day?.day_number ??
+    day?.dayNumber ??
+    day?.number ??
+    null
+
+  const dayNumber = Number(rawValue)
+  return Number.isFinite(dayNumber) && dayNumber > 0 ? dayNumber : null
 }
 
 const getExerciseDisplayName = (exercise) =>
   exercise?.name || exercise?.exercise_name || exercise?.exerciseName || 'Ejercicio'
 
 const getExerciseDisplayGroup = (exercise) =>
-  exercise?.muscle_group || exercise?.muscleGroup || 'Ejercicio del plan'
+  exercise?.muscle_group ||
+  exercise?.muscleGroup ||
+  exercise?.category ||
+  exercise?.group ||
+  exercise?.target_muscle ||
+  exercise?.targetMuscle ||
+  'Ejercicio del plan'
+
+const getExerciseBackendImageUrl = (exercise) =>
+  exercise?.image_url ||
+  exercise?.imageUrl ||
+  exercise?.image ||
+  exercise?.image_uri ||
+  exercise?.imageUri ||
+  null
+
+const EXERCISE_MODE_PATTERNS = [
+  { mode: 'core', pattern: /plank|plancha|ab wheel|ab-wheel|hollow|dead bug|bird dog/i },
+  { mode: 'press', pattern: /press|overhead|shoulder|military|militar/i },
+  { mode: 'curl', pattern: /curl|bíceps|biceps|martillo|hammer/i },
+  { mode: 'hold', pattern: /wall sit|sentadilla isom[eé]trica|isometric|iso hold|hold/i },
+  { mode: 'squat', pattern: /sentadilla|squat|estocad|zancad|lunge|peso muerto|deadlift|hip thrust|glute bridge|puente de gluteo|gemel|calf|step up|box jump/i },
+  { mode: 'squat', pattern: /polichinela|burpee|marcha en sitio|rodillas altas|high knees|mountain climber|mountain climbers/i },
+]
+
+const EXERCISE_OVERRIDES = [
+  {
+    pattern: /sentadilla al caj[oó]n/i,
+    trackingMode: 'squat',
+    countMode: 'reps',
+  },
+  {
+    pattern: /zancadas alternas por tiempo/i,
+    trackingMode: 'squat',
+    countMode: 'reps',
+  },
+  {
+    pattern: /saltos con zancada alterna/i,
+    trackingMode: 'squat',
+    countMode: 'timer',
+    defaultDurationSeconds: 30,
+  },
+  {
+    pattern: /polichinelas?/i,
+    trackingMode: 'squat',
+    countMode: 'reps',
+  },
+  {
+    pattern: /burpees?/i,
+    trackingMode: 'squat',
+    countMode: 'reps',
+  },
+  {
+    pattern: /marcha en sitio rodillas altas|rodillas altas|high knees/i,
+    trackingMode: 'squat',
+    countMode: 'reps',
+  },
+  {
+    pattern: /mountain climbers?|escaladores?/i,
+    trackingMode: 'squat',
+    countMode: 'reps',
+  },
+  {
+    pattern: /estocadas est[aá]ticas/i,
+    trackingMode: 'squat',
+    countMode: 'reps',
+  },
+  {
+    pattern: /flexiones en pared o rodillas/i,
+    trackingMode: 'press',
+    countMode: 'reps',
+  },
+  {
+    pattern: /flexiones de pecho/i,
+    trackingMode: 'press',
+    countMode: 'reps',
+  },
+  {
+    pattern: /flexiones diamante/i,
+    trackingMode: 'press',
+    countMode: 'reps',
+  },
+  {
+    pattern: /remo sentado con banda/i,
+    trackingMode: 'row',
+    countMode: 'reps',
+  },
+  {
+    pattern: /elevaciones de talones sentado/i,
+    trackingMode: 'squat',
+    countMode: 'reps',
+  },
+  {
+    pattern: /flexiones rusas de antebrazos/i,
+    trackingMode: 'russian',
+    countMode: 'reps',
+  },
+  {
+    pattern: /remo con mancuerna apoyado en banco/i,
+    trackingMode: 'row',
+    countMode: 'reps',
+  },
+  {
+    pattern: /remo con banda o mancuerna/i,
+    trackingMode: 'row',
+    countMode: 'reps',
+  },
+  {
+    pattern: /hip thrust en suelo/i,
+    trackingMode: 'manual',
+    countMode: 'timer',
+    defaultDurationSeconds: 60,
+  },
+  {
+    pattern: /elevaciones de talones sentado/i,
+    trackingMode: 'manual',
+    countMode: 'timer',
+    defaultDurationSeconds: 60,
+  },
+]
+
+const resolveExerciseOverride = (exercise) => {
+  const searchable = normalizeExerciseLabel(`${getExerciseDisplayName(exercise)} ${getExerciseDisplayGroup(exercise)}`)
+  return EXERCISE_OVERRIDES.find((item) => item.pattern.test(searchable)) || null
+}
+
+const resolveExerciseTrackingMode = (exercise) => {
+  const override = resolveExerciseOverride(exercise)
+  if (override?.trackingMode) return override.trackingMode
+
+  const directMode = String(exercise?.trackingMode || exercise?.mode || exercise?.countMode || '').trim().toLowerCase()
+  if (directMode) {
+    if (['squat', 'press', 'curl', 'core', 'manual', 'hold', 'russian', 'row'].includes(directMode)) return directMode
+    if (directMode === 'timer') return 'core'
+  }
+
+  const displayName = String(getExerciseDisplayName(exercise)).trim().toLowerCase()
+  const category = String(getExerciseDisplayGroup(exercise)).trim().toLowerCase()
+  const searchable = `${displayName} ${category}`
+
+  const match = EXERCISE_MODE_PATTERNS.find((item) => item.pattern.test(searchable))
+  return match?.mode || 'manual'
+}
+
+const buildRuntimeExerciseDefinition = (exercise, fallbackName = '') => {
+  const displayName = getExerciseDisplayName(exercise) || fallbackName || DEFAULT_EXERCISE_NAME
+  const backendImageUrl = getExerciseBackendImageUrl(exercise)
+  const imageUrl = backendImageUrl || null
+  const category = getExerciseDisplayGroup(exercise) || 'Ejercicio del plan'
+  const override = resolveExerciseOverride({ ...exercise, name: displayName, category })
+  const directCountMode = exercise?.mode || exercise?.countMode || null
+  const trackingMode = resolveExerciseTrackingMode({ ...exercise, name: displayName, category })
+  const countMode = directCountMode || override?.countMode || inferExerciseCountMode(exercise)
+  const defaultDurationSeconds =
+    Number(override?.defaultDurationSeconds || 0) ||
+    Number(exercise?.defaultDurationSeconds ?? exercise?.duration_seconds ?? exercise?.durationSeconds ?? exercise?.duration ?? 0) ||
+    getExerciseDefaultDurationSeconds({ ...exercise, name: displayName, mode: countMode })
+
+  return {
+    ...exercise,
+    name: displayName,
+    category,
+    trackingMode: trackingMode || 'manual',
+    mode: countMode,
+    countMode,
+    requiresPose:
+      exercise?.requiresPose ??
+      (trackingMode !== 'manual'),
+    defaultDurationSeconds,
+    description:
+      exercise?.description ||
+      `${category} en modo ${trackingMode || 'guía'}`,
+    imageUrl,
+    liveLabel:
+      exercise?.liveLabel ||
+      (countMode === 'timer'
+        ? 'Timer'
+        : trackingMode === 'manual'
+          ? 'Modo guía'
+          : trackingMode === 'core'
+            ? 'Core'
+            : 'Live'),
+  }
+}
 
 const parseExerciseDurationSeconds = (value) => {
   if (value == null) return 0
@@ -64,11 +273,18 @@ const TIMER_EXERCISE_PATTERN =
   /plank|plancha|caminata|bici|cardio|sprint|marcha en sitio|estiramientos|saltos en caja|burpees|mountain climbers|remo/
 
 const inferExerciseCountMode = (exercise) => {
-  const directMode = exercise?.countMode
+  const override = resolveExerciseOverride(exercise)
+  if (override?.countMode) return override.countMode
+
+  const directMode = exercise?.mode || exercise?.countMode
   if (directMode) return directMode
 
   const displayName = String(getExerciseDisplayName(exercise) || '').trim().toLowerCase()
   const displayGroup = String(getExerciseDisplayGroup(exercise) || '').trim().toLowerCase()
+
+  if (/\b(?:por\s+tiempo|tiempo|seg(?:undos?)?|seconds?|s)\b/i.test(displayName) || /\b(?:por\s+tiempo|tiempo|seg(?:undos?)?|seconds?|s)\b/i.test(displayGroup)) {
+    return 'timer'
+  }
 
   if (TIMER_EXERCISE_PATTERN.test(displayName) || displayGroup.includes('cardio') || displayGroup.includes('core')) {
     return 'timer'
@@ -82,11 +298,21 @@ const inferExerciseCountMode = (exercise) => {
 }
 
 const getExerciseDefaultDurationSeconds = (exercise) => {
+  const override = resolveExerciseOverride(exercise)
+  if (override?.defaultDurationSeconds) {
+    return Number(override.defaultDurationSeconds) || 0
+  }
+
   if (exercise?.defaultDurationSeconds) {
     return Number(exercise.defaultDurationSeconds) || 0
   }
 
+  const directMode = String(exercise?.mode || exercise?.countMode || '').trim().toLowerCase()
   const displayName = String(getExerciseDisplayName(exercise) || '').trim().toLowerCase()
+  if (directMode === 'hold') {
+    return 30
+  }
+
   if (/plank|plancha/.test(displayName)) {
     return 45
   }
@@ -99,14 +325,7 @@ const getExerciseDefaultDurationSeconds = (exercise) => {
 }
 
 const getExerciseImageUrl = (exercise) => {
-  const displayName = getExerciseDisplayName(exercise)
-  const directMatch = TRAINING_EXERCISES_BY_NAME[displayName]
-  if (directMatch?.imageUrl) return directMatch.imageUrl
-
-  const normalizedMatch = TRAINING_EXERCISES.find(
-    (item) => normalizeExerciseLabel(item.name) === normalizeExerciseLabel(displayName),
-  )
-  return normalizedMatch?.imageUrl || null
+  return getExerciseBackendImageUrl(exercise)
 }
 
 function ExerciseGuideImage({ src, alt, wrapperClassName = '', imageClassName = '', placeholderClassName = '' }) {
@@ -115,9 +334,11 @@ function ExerciseGuideImage({ src, alt, wrapperClassName = '', imageClassName = 
   if (!src || hasError) {
     return (
       <div
-        className={`flex items-center justify-center bg-gradient-to-br from-gym-accent to-gym-sidebar text-[10px] font-mono uppercase tracking-[0.22em] text-gym-muted ${placeholderClassName}`}
+        className={`flex items-center justify-center bg-[radial-gradient(circle_at_top,rgba(0,229,255,0.10),transparent_42%),linear-gradient(135deg,#0a1220_0%,#111c33_45%,#08101d_100%)] text-[10px] font-mono uppercase tracking-[0.22em] text-gym-muted ${placeholderClassName}`}
       >
-        Sin imagen precisa
+        <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[9px] text-white/60">
+          Sin imagen precisa
+        </span>
       </div>
     )
   }
@@ -171,6 +392,132 @@ const saveCompletedRoutineSummary = ({
   window.dispatchEvent(new Event('gympose-routine-completed'))
 }
 
+const getRoutineExerciseIdentity = (exercise) => {
+  if (!exercise) return ''
+  const rawValue =
+    exercise.id ??
+    exercise.exercise_id ??
+    exercise.exerciseId ??
+    exercise.name ??
+    exercise.exercise_name ??
+    exercise.title ??
+    ''
+  return String(rawValue).trim().toLowerCase()
+}
+
+const mergeRoutineExerciseLists = (previousExercises = [], nextExercises = []) => {
+  const mergedByKey = new Map()
+
+  previousExercises.forEach((exercise) => {
+    const key = getRoutineExerciseIdentity(exercise)
+    if (key) mergedByKey.set(key, { ...exercise })
+  })
+
+  nextExercises.forEach((exercise) => {
+    const key = getRoutineExerciseIdentity(exercise)
+    if (!key) return
+    const current = mergedByKey.get(key) || {}
+    mergedByKey.set(key, { ...current, ...exercise })
+  })
+
+  return Array.from(mergedByKey.values())
+}
+
+const mergeRoutineDayProgress = (previousDay, nextDay) => {
+  if (!nextDay) return previousDay || null
+  if (!previousDay) return nextDay
+
+  const previousDayNumber = resolveRoutineDayNumber(previousDay)
+  const nextDayNumber = resolveRoutineDayNumber(nextDay)
+  if (previousDayNumber != null && nextDayNumber != null && previousDayNumber !== nextDayNumber) {
+    return nextDay
+  }
+
+  const previousExercises = Array.isArray(previousDay.exercises) ? previousDay.exercises : []
+  const nextExercises = Array.isArray(nextDay.exercises) ? nextDay.exercises : []
+  const currentExercise = nextDay.current_exercise || nextDay.currentExercise || null
+
+  const mergedExercises = mergeRoutineExerciseLists(previousExercises, nextExercises)
+  if (currentExercise) {
+    const currentKey = getRoutineExerciseIdentity(currentExercise)
+    const currentIndex = mergedExercises.findIndex((exercise) => getRoutineExerciseIdentity(exercise) === currentKey)
+    if (currentIndex >= 0) {
+      mergedExercises[currentIndex] = {
+        ...mergedExercises[currentIndex],
+        ...currentExercise,
+      }
+    } else if (currentKey) {
+      mergedExercises.push({ ...currentExercise })
+    }
+  }
+
+  const mergedSessionSummary = {
+    ...(previousDay.session_summary || previousDay.sessionSummary || {}),
+    ...(nextDay.session_summary || nextDay.sessionSummary || {}),
+  }
+
+  const mergedCurrentExercise = currentExercise
+    ? {
+        ...(previousDay.current_exercise || previousDay.currentExercise || {}),
+        ...currentExercise,
+      }
+    : (previousDay.current_exercise || previousDay.currentExercise || null)
+
+  return {
+    ...previousDay,
+    ...nextDay,
+    exercises: mergedExercises.length ? mergedExercises : (nextExercises.length ? nextExercises : previousExercises),
+    current_exercise: mergedCurrentExercise,
+    currentExercise: mergedCurrentExercise,
+    session_summary: mergedSessionSummary,
+    sessionSummary: mergedSessionSummary,
+  }
+}
+
+const mergeRoutineProgressPayload = (previousProgress, payload) => {
+  if (!payload) return previousProgress || null
+  if (!previousProgress) return payload
+
+  const previousDay =
+    previousProgress.current_day ||
+    previousProgress.currentDay ||
+    previousProgress.day ||
+    previousProgress.current_routine_day ||
+    null
+  const nextDay =
+    payload.current_day ||
+    payload.currentDay ||
+    payload.day ||
+    payload.current_routine_day ||
+    null
+
+  if (!previousDay || !nextDay) {
+    return {
+      ...previousProgress,
+      ...payload,
+    }
+  }
+
+  const mergedDay = mergeRoutineDayProgress(previousDay, nextDay)
+  const mergedSummary = {
+    ...(previousProgress.session_summary || previousProgress.sessionSummary || {}),
+    ...(payload.session_summary || payload.sessionSummary || {}),
+    ...(mergedDay?.session_summary || mergedDay?.sessionSummary || {}),
+  }
+
+  return {
+    ...previousProgress,
+    ...payload,
+    current_day: mergedDay,
+    currentDay: mergedDay,
+    day: mergedDay,
+    current_routine_day: mergedDay,
+    exercises: mergedDay?.exercises || payload.exercises || previousProgress.exercises || [],
+    session_summary: mergedSummary,
+    sessionSummary: mergedSummary,
+  }
+}
+
 const formatDuration = (totalSeconds) => {
   const seconds = Number(totalSeconds || 0)
   if (!seconds || seconds < 0) return '0 min'
@@ -195,6 +542,88 @@ const formatCountdown = (totalSeconds) => {
   const minutes = Math.floor(seconds / 60)
   const remainingSeconds = seconds % 60
   return `${String(minutes).padStart(2, '0')}:${String(remainingSeconds).padStart(2, '0')}`
+}
+
+const formatSetLabel = (currentSet, targetSet) => {
+  const current = Math.max(Number(currentSet || 0), 1)
+  const target = Math.max(Number(targetSet || 0), current)
+  return `Serie ${current}/${target}`
+}
+
+const getExerciseMetricLabel = (mode) => {
+  if (mode === 'hold') return 'Sostén'
+  if (mode === 'timer') return 'Tiempo'
+  return 'Reps'
+}
+
+const getPoseCorrectionPrefix = ({ trackingMode, exerciseName, exerciseCountMode }) => {
+  const label = String(exerciseName || '').toLowerCase()
+  if (/curl|bíceps|biceps|martillo|hammer/.test(label) || trackingMode === 'curl') {
+    return 'Corrige el curl: baja el brazo completo y vuelve a extenderlo'
+  }
+  if (/remo|row/.test(label) || trackingMode === 'row') {
+    return 'Corrige el remo: lleva el codo hacia atrás y controla la vuelta'
+  }
+  if (/rusa|antebrazo/.test(label) || trackingMode === 'russian') {
+    return 'Corrige la flexión rusa: baja al antebrazo y regresa con control'
+  }
+  if (/press|overhead|shoulder|military|militar/.test(label) || trackingMode === 'press') {
+    return 'Corrige el press: sube recto por encima de la cabeza y evita inclinarte'
+  }
+  if (/plank|plancha/.test(label) || trackingMode === 'core') {
+    return 'Corrige el core: alinea hombros, cadera y talones'
+  }
+  if (/polichinela|jumping jack/.test(label)) {
+    return 'Corrige el polichinela: abre y cierra brazos y piernas por completo'
+  }
+  if (/burpee/.test(label)) {
+    return 'Corrige el burpee: baja al suelo y vuelve a subir completo'
+  }
+  if (/rodillas altas|high knees|marcha en sitio/.test(label)) {
+    return 'Corrige las rodillas altas: eleva la rodilla por encima de la cadera'
+  }
+  if (/mountain climber|mountain climbers|escalador/.test(label)) {
+    return 'Corrige el mountain climber: acerca la rodilla al pecho y alterna'
+  }
+  if (exerciseCountMode === 'timer' || exerciseCountMode === 'hold') return 'Corrige el tiempo: mantén el ritmo y completa el contador'
+  return 'Corrige la postura: ajusta tu posición y repite'
+}
+
+const formatPoseFeedbackMessage = ({ message, requiresPose, isValid, trackingMode, exerciseName, exerciseCountMode }) => {
+  const text = String(message || '').trim()
+  if (!text) return text
+  if (!requiresPose || isValid || text.toLowerCase().startsWith('corrige')) return text
+
+  const prefix = getPoseCorrectionPrefix({ trackingMode, exerciseName, exerciseCountMode })
+  return `${prefix}: ${text}`
+}
+
+const getSetCompletionCopy = ({ currentSet, targetSets, restSeconds, isCompleted }) => {
+  const current = Math.max(Number(currentSet || 0), 1)
+  const target = Math.max(Number(targetSets || 0), current)
+  const nextSet = Math.min(current + 1, target)
+
+  if (isCompleted) {
+    return {
+      title: 'Ejercicio completado',
+      message: 'Ya guardamos este ejercicio como completado en el backend.',
+    }
+  }
+
+  if (Number(target) > current && Number(restSeconds || 0) > 0) {
+    return {
+      title: 'Serie completada',
+      message: `Descanso antes de la siguiente serie: ${formatDuration(restSeconds)}. Luego continúa con ${formatSetLabel(nextSet, target)}.`,
+    }
+  }
+
+  return {
+    title: 'Serie completada',
+    message:
+      Number(target) > current
+        ? `Prepara ${formatSetLabel(nextSet, target)}.`
+        : 'La serie quedó guardada y puedes continuar con el siguiente ejercicio.',
+  }
 }
 
 const formatDateTime = (value) => {
@@ -230,23 +659,21 @@ export default function Training() {
   const [notice, setNotice] = useState(null)
   const [selectedRoutineDay, setSelectedRoutineDay] = useState(location.state?.routineDay || null)
   const [selectedRoutineDayId, setSelectedRoutineDayId] = useState(
-    location.state?.routineDayId || location.state?.routineDay?.day_number || null,
+    resolveRoutineDayNumber(location.state?.routineDay) || location.state?.routineDayId || null,
   )
   const [exerciseName, setExerciseName] = useState(() => {
     const routineDay = location.state?.routineDay || null
     const firstExerciseName = routineDay?.exercises?.[0]?.name
-    return TRAINING_EXERCISES_BY_NAME[firstExerciseName]?.name || DEFAULT_EXERCISE_NAME
+    return firstExerciseName || DEFAULT_EXERCISE_NAME
   })
   const [curlStartArm, setCurlStartArm] = useState('left')
   const [curlRepsPerArm, setCurlRepsPerArm] = useState(10)
   const [plankSeconds, setPlankSeconds] = useState(0)
   const [plankStarted, setPlankStarted] = useState(false)
   const [timedExerciseSeconds, setTimedExerciseSeconds] = useState(0)
+  const [manualTimerMinutesByExercise, setManualTimerMinutesByExercise] = useState({})
   const [isSetResting, setIsSetResting] = useState(false)
   const [restCountdown, setRestCountdown] = useState(0)
-  const [exerciseFilter, setExerciseFilter] = useState('')
-  const [exerciseTypeFilter, setExerciseTypeFilter] = useState('all')
-  const [exerciseCategoryFilter, setExerciseCategoryFilter] = useState('Todas')
   const showExerciseCatalog = false
   const [routineProgress, setRoutineProgress] = useState(null)
   const [routineLoading, setRoutineLoading] = useState(false)
@@ -254,64 +681,38 @@ export default function Training() {
   const [isCompletingRoutine, setIsCompletingRoutine] = useState(false)
   const [selectedTrainingPlan, setSelectedTrainingPlan] = useState(location.state?.trainingPlan || null)
   const [hasBootstrappedRoutine, setHasBootstrappedRoutine] = useState(false)
-  const lastGestureToggleRef = useRef(0)
+  const hasRouteTrainingPlan = Boolean(location.state?.trainingPlan)
+  const routeRoutineDay = location.state?.routineDay || null
 
   useEffect(() => {
-    if (selectedTrainingPlan) return
+    if (selectedRoutineDayId || !selectedTrainingPlan?.current_day) return
 
-    const cachedPlan = localStorage.getItem('gympose_training_plan')
-    if (!cachedPlan) return
-
-    try {
-      const parsed = JSON.parse(cachedPlan)
-      const normalizedPlan = normalizeTrainingPlan(parsed)
-      if (normalizedPlan) {
-        setSelectedTrainingPlan(normalizedPlan)
-      }
-    } catch {
-      localStorage.removeItem('gympose_training_plan')
-    }
-  }, [selectedTrainingPlan])
-
-  const activeExercise =
-    TRAINING_EXERCISES_BY_NAME[exerciseName] ||
-    TRAINING_EXERCISES_BY_NAME[DEFAULT_EXERCISE_NAME] ||
-    TRAINING_EXERCISES[0]
-  const trackingMode = activeExercise.trackingMode
-  const exerciseCountMode = inferExerciseCountMode(activeExercise)
-  const requiresPose = Boolean(activeExercise.requiresPose && exerciseCountMode === 'reps')
-  const poseExerciseMode = requiresPose ? trackingMode : 'manual'
-  const isTimerExercise = exerciseCountMode === 'timer'
-  const isManualExercise = exerciseCountMode === 'manual'
-  const isPlankExercise = exerciseCountMode === 'timer' && /plank|plancha/i.test(activeExercise.name)
-
-  const filteredExerciseGroups = useMemo(() => {
-    const query = exerciseFilter.trim().toLowerCase()
-
-    return TRAINING_EXERCISE_GROUPS
-      .map((group) => ({
-        ...group,
-        items: group.items.filter((item) => {
-          const searchable = `${item.name} ${item.category} ${item.liveLabel} ${item.description}`.toLowerCase()
-          const matchesQuery = !query || searchable.includes(query)
-          const matchesType = exerciseTypeFilter === 'all' || item.trackingMode === exerciseTypeFilter
-          const matchesCategory = exerciseCategoryFilter === 'Todas' || item.category === exerciseCategoryFilter
-          return matchesQuery && matchesType && matchesCategory
-        }),
-      }))
-      .filter((group) => group.items.length > 0)
-  }, [exerciseCategoryFilter, exerciseFilter, exerciseTypeFilter])
-
-  const categoryOptions = useMemo(
-    () => ['Todas', ...TRAINING_EXERCISE_GROUPS.map((group) => group.category)],
-    [],
-  )
+    const cachedCurrentDay = selectedTrainingPlan.current_day
+    setSelectedRoutineDay(cachedCurrentDay)
+    setSelectedRoutineDayId(resolveRoutineDayNumber(cachedCurrentDay))
+  }, [selectedRoutineDayId, selectedTrainingPlan])
 
   const savedRoutineDays = useMemo(
     () => (Array.isArray(selectedTrainingPlan?.days) ? selectedTrainingPlan.days : []),
     [selectedTrainingPlan],
   )
-  const routineDayState = routineProgress?.current_day || routineProgress?.currentDay || null
+  const savedRoutineDayNumbers = useMemo(
+    () =>
+      new Set(
+        savedRoutineDays
+          .map((day) => resolveRoutineDayNumber(day))
+          .filter((value) => value != null),
+      ),
+    [savedRoutineDays],
+  )
+  const routineProgressDayState = routineProgress?.current_day || routineProgress?.currentDay || null
+  const routineProgressDayNumber = resolveRoutineDayNumber(routineProgressDayState)
+  const selectedRoutineDayMatchesProgress =
+    selectedRoutineDayId != null &&
+    routineProgressDayNumber != null &&
+    Number(selectedRoutineDayId) === Number(routineProgressDayNumber)
+  const routineDayState =
+    selectedRoutineDayId == null || selectedRoutineDayMatchesProgress ? routineProgressDayState : null
   const routineCurrentExerciseState = routineDayState?.current_exercise || routineDayState?.currentExercise || null
   const sessionSummary =
     routineDayState?.session_summary ||
@@ -324,16 +725,62 @@ export default function Training() {
     routineCurrentExerciseState?.exercise_name ||
     routineCurrentExerciseState?.exerciseName ||
     null
-  const planRoutineDay = selectedRoutineDay || savedRoutineDays[0] || null
-  const routineExercises = Array.isArray((routineDayState || planRoutineDay)?.exercises)
-    ? (routineDayState || planRoutineDay).exercises
-    : []
-  const routineExerciseEntries = Array.isArray(routineDayState?.exercises)
-    ? routineDayState.exercises
-    : routineExercises
-  const activeRoutineDay = routineDayState || planRoutineDay
+  const selectedRoutineDayNumber = resolveRoutineDayNumber(selectedRoutineDay)
+  const planRoutineDay =
+    (hasRouteTrainingPlan ? routeRoutineDay : null) ||
+    savedRoutineDays.find((day) => resolveRoutineDayNumber(day) === selectedRoutineDayNumber) ||
+    selectedRoutineDay ||
+    savedRoutineDays[0] ||
+    null
+  const routineExerciseCandidates = [
+    routineDayState?.exercises,
+    selectedRoutineDay?.exercises,
+    planRoutineDay?.exercises,
+  ]
+  const routineExerciseEntries =
+    routineExerciseCandidates.find((entries) => Array.isArray(entries) && entries.length > 0) || []
+  const activeRoutineDay =
+    (routineDayState &&
+    (Array.isArray(routineDayState.exercises) ? routineDayState.exercises.length > 0 : true)
+      ? routineDayState
+      : null) ||
+    selectedRoutineDay ||
+    planRoutineDay
   const routineWeekDays = savedRoutineDays.slice(0, 7)
   const routineTodayLabel = activeRoutineDay?.day_name || activeRoutineDay?.day_label || 'Rutina de hoy'
+  const activeRoutineExerciseIndex = routineExerciseEntries.findIndex((entry) => {
+    const entryName = getExerciseDisplayName(entry)
+    return normalizeExerciseLabel(entryName) === normalizeExerciseLabel(exerciseName)
+  })
+  const showExerciseDebugControls = import.meta.env.DEV || localStorage.getItem('gympose_routine_debug') === '1'
+
+  const selectRoutineExerciseAtIndex = useCallback(
+    (nextIndex) => {
+      if (!routineExerciseEntries.length) return
+
+      const totalExercises = routineExerciseEntries.length
+      const normalizedIndex = ((nextIndex % totalExercises) + totalExercises) % totalExercises
+      const nextExercise = routineExerciseEntries[normalizedIndex]
+      if (!nextExercise) return
+
+      const displayName = getExerciseDisplayName(nextExercise)
+
+      hasManualExerciseSelectionRef.current = true
+      setExerciseName(displayName)
+    },
+    [routineExerciseEntries],
+  )
+
+  const handlePreviousExercise = useCallback(() => {
+    const baseIndex = activeRoutineExerciseIndex >= 0 ? activeRoutineExerciseIndex : 0
+    selectRoutineExerciseAtIndex(baseIndex - 1)
+  }, [activeRoutineExerciseIndex, selectRoutineExerciseAtIndex])
+
+  const handleNextExercise = useCallback(() => {
+    const baseIndex = activeRoutineExerciseIndex >= 0 ? activeRoutineExerciseIndex : -1
+    selectRoutineExerciseAtIndex(baseIndex + 1)
+  }, [activeRoutineExerciseIndex, selectRoutineExerciseAtIndex])
+
   const activeRoutineExerciseProgress =
     routineCurrentExerciseState ||
     routineExerciseEntries.find((entry) => {
@@ -346,6 +793,30 @@ export default function Training() {
       const entryName = entry?.name || entry?.exercise_name
       return entryName && normalizeExerciseLabel(entryName) === normalizeExerciseLabel(routineCurrentExerciseName)
     }) || null
+  const manuallySelectedExerciseSource = hasManualExerciseSelectionRef.current
+    ? routineExerciseEntries.find((entry) => {
+        const entryName = entry?.name || entry?.exercise_name
+        return entryName && normalizeExerciseLabel(entryName) === normalizeExerciseLabel(exerciseName)
+      }) || { name: exerciseName }
+    : null
+  const activeExerciseSource =
+    manuallySelectedExerciseSource ||
+    activeRoutineExerciseProgress ||
+    activeRoutineExercisePlanEntry ||
+    routineCurrentExerciseState ||
+    selectedRoutineDay ||
+    { name: exerciseName }
+  const activeExercise = buildRuntimeExerciseDefinition(activeExerciseSource, exerciseName)
+  const trackingMode = activeExercise.trackingMode
+  const exerciseCountMode = inferExerciseCountMode(activeExercise)
+  const requiresPose = Boolean(activeExercise.requiresPose && exerciseCountMode === 'reps')
+  const poseExerciseMode = requiresPose ? trackingMode : 'manual'
+  const isTimerExercise = exerciseCountMode === 'timer'
+  const isHoldExercise = exerciseCountMode === 'hold'
+  const isManualTimedExercise = isTimerExercise && trackingMode === 'manual'
+  const isManualExercise = exerciseCountMode === 'manual'
+  const isPlankExercise = (isTimerExercise || isHoldExercise) && /plank|plancha/i.test(activeExercise.name)
+  const activeExerciseTimerKey = normalizeExerciseLabel(activeExercise.name)
   const currentSetValue =
     activeRoutineExerciseProgress?.current_set ??
       activeRoutineExerciseProgress?.currentSet ??
@@ -382,14 +853,18 @@ export default function Training() {
       activeRoutineExercisePlanEntry?.rest_seconds ??
       0,
   )
-  const timedTargetSeconds = parseExerciseDurationSeconds(
-    activeRoutineExerciseProgress?.duration_seconds ??
-      activeRoutineExercisePlanEntry?.duration_seconds ??
-      activeRoutineExercisePlanEntry?.time ??
-      activeRoutineExercisePlanEntry?.duration ??
-      0,
-  ) || (isTimerExercise ? getExerciseDefaultDurationSeconds(activeExercise) : 0)
-  const isTimedExercise = isTimerExercise || timedTargetSeconds > 0
+  const manualTimerMinutes = Number(manualTimerMinutesByExercise[activeExerciseTimerKey] || 1)
+  const manualTimerTargetSeconds = Math.max(60, manualTimerMinutes * 60)
+  const timedTargetSeconds = isManualTimedExercise
+    ? manualTimerTargetSeconds
+    : (parseExerciseDurationSeconds(
+        activeRoutineExerciseProgress?.duration_seconds ??
+          activeRoutineExercisePlanEntry?.duration_seconds ??
+          activeRoutineExercisePlanEntry?.time ??
+          activeRoutineExercisePlanEntry?.duration ??
+          0,
+      ) || ((isTimerExercise || isHoldExercise) ? getExerciseDefaultDurationSeconds(activeExercise) : 0))
+  const isTimedExercise = isTimerExercise || isHoldExercise || timedTargetSeconds > 0
   const timedRemainingSeconds = Math.max(timedTargetSeconds - timedExerciseSeconds, 0)
   const routineStatus = routineDayState?.status || routineCurrentExerciseState?.status || null
   const isRoutineActive = routineStatus === 'in_progress'
@@ -404,6 +879,8 @@ export default function Training() {
       activeRoutineExercisePlanEntry?.setsCompleted ??
       0,
   )
+  const currentSeriesValue = Number(currentSetValue || (currentExerciseCompletedSets > 0 ? currentExerciseCompletedSets + 1 : 1))
+  const plannedSeriesValue = Number(setsTargetValue || activeExercise.sets || activeRoutineExercisePlanEntry?.sets || 1)
   const isSetRestActive = isSetResting && restCountdown > 0
   const isCurrentExerciseCompleted =
     currentExerciseStatus === 'completed' ||
@@ -447,6 +924,19 @@ export default function Training() {
       routineDayState?.progress_pct ??
       (totalExercisesPlanned > 0 ? Math.round((completedExercisesCount / totalExercisesPlanned) * 100) : 0),
   )
+
+  useEffect(() => {
+    if (!isManualTimedExercise) return
+
+    setManualTimerMinutesByExercise((current) => {
+      if (current[activeExerciseTimerKey]) return current
+      return {
+        ...current,
+        [activeExerciseTimerKey]: Math.max(1, Math.round(Number(activeExercise.defaultDurationSeconds || 60) / 60) || 1),
+      }
+    })
+    setTimedExerciseSeconds(0)
+  }, [activeExercise.defaultDurationSeconds, activeExerciseTimerKey, isManualTimedExercise])
   const hasFinalSummary = Boolean(
     sessionSummary?.day_completed || routineDayState?.completed_at || isRoutineCompleted,
   )
@@ -456,34 +946,32 @@ export default function Training() {
 
     const plan = data.plan || data.training_plan || data.active_plan || data.current_plan || null
     const normalizedPlan = normalizeTrainingPlan(plan)
+    const looksLikeTopLevelDay =
+      data.day_number != null ||
+      data.plan_day_number != null ||
+      data.routine_id != null ||
+      Array.isArray(data.exercises)
     const currentDay =
       data.current_day ||
       data.currentDay ||
       data.day ||
       data.current_routine_day ||
+      (looksLikeTopLevelDay ? data : null) ||
       null
-    const currentDayId =
-      currentDay?.day_number ||
-      currentDay?.day_id ||
-      currentDay?.id ||
-      data.day_id ||
-      data.dayId ||
-      null
-
-    if (normalizedPlan) {
+    const currentDayNumber = resolveRoutineDayNumber(currentDay)
+    if (normalizedPlan && !hasRouteTrainingPlan) {
       setSelectedTrainingPlan(normalizedPlan)
     }
 
     if (currentDay) {
+      setRoutineProgress((currentProgress) => mergeRoutineProgressPayload(currentProgress, data))
       setSelectedRoutineDay(currentDay)
     }
 
-    if (currentDayId != null) {
-      setSelectedRoutineDayId(currentDayId)
-      lastLoadedRoutineDayRef.current = String(currentDayId)
+    if (currentDayNumber != null) {
+      setSelectedRoutineDayId(currentDayNumber)
+      lastLoadedRoutineDayRef.current = String(currentDayNumber)
     }
-
-    setRoutineProgress(data)
 
     const backendExerciseName =
       currentDay?.current_exercise?.name ||
@@ -493,13 +981,12 @@ export default function Training() {
       null
 
     if (backendExerciseName) {
-      const normalized = TRAINING_EXERCISES_BY_NAME[backendExerciseName]
-      setExerciseName(normalized?.name || backendExerciseName)
+      setExerciseName(backendExerciseName)
       hasManualExerciseSelectionRef.current = false
     }
 
-    return { plan: normalizedPlan, currentDay, currentDayId }
-  }, [])
+    return { plan: normalizedPlan, currentDay, currentDayNumber }
+  }, [hasRouteTrainingPlan, selectedRoutineDay])
 
   const syncRoutineProgressFromResponse = useCallback((payload) => {
     if (!payload) return null
@@ -548,6 +1035,35 @@ export default function Training() {
     }
   }, [hydrateRoutineFromResponse, token])
 
+  useEffect(() => {
+    if (!token || hasBootstrappedRoutine) return
+
+    let cancelled = false
+
+    const bootstrapPlan = async () => {
+      setHasBootstrappedRoutine(true)
+
+      const currentState = await loadCurrentTrainingState()
+      if (cancelled) return
+
+      if (currentState?.plan) {
+        setSelectedTrainingPlan(currentState.plan)
+      }
+
+      if (!selectedRoutineDayId && !currentState?.currentDay && currentState?.plan?.current_day) {
+        const backendCurrentDay = currentState.plan.current_day
+        setSelectedRoutineDay(backendCurrentDay)
+        setSelectedRoutineDayId(resolveRoutineDayNumber(backendCurrentDay))
+      }
+    }
+
+    void bootstrapPlan()
+
+    return () => {
+      cancelled = true
+    }
+  }, [hasBootstrappedRoutine, loadCurrentTrainingState, selectedRoutineDayId, token])
+
   const {
     status: cameraStatus,
     error: cameraError,
@@ -556,34 +1072,6 @@ export default function Training() {
     isActive: isCameraActive,
     isStarting,
   } = useCameraStream(videoRef)
-
-  useEffect(() => {
-    if (!token) return
-    if (selectedRoutineDayId) return
-    if (hasBootstrappedRoutine) return
-
-    let cancelled = false
-
-    const bootstrapCurrentRoutine = async () => {
-      setHasBootstrappedRoutine(true)
-      const result = await loadCurrentTrainingState()
-      if (cancelled || !result) return
-
-      if (result.currentDayId != null) {
-        setSelectedRoutineDayId(result.currentDayId)
-      }
-
-      if (result.currentDay) {
-        setSelectedRoutineDay(result.currentDay)
-      }
-    }
-
-    bootstrapCurrentRoutine()
-
-    return () => {
-      cancelled = true
-    }
-  }, [hasBootstrappedRoutine, loadCurrentTrainingState, selectedRoutineDayId, token])
 
   useEffect(() => {
     if (!token || !selectedRoutineDayId) return
@@ -611,7 +1099,14 @@ export default function Training() {
   useEffect(() => {
     if (!routineCurrentExerciseName) return
 
-    const nextExerciseName = TRAINING_EXERCISES_BY_NAME[routineCurrentExerciseName]?.name || routineCurrentExerciseName
+    if (
+      hasManualExerciseSelectionRef.current &&
+      normalizeExerciseLabel(exerciseName) !== normalizeExerciseLabel(routineCurrentExerciseName)
+    ) {
+      return
+    }
+
+    const nextExerciseName = routineCurrentExerciseName
     if (nextExerciseName !== exerciseName) {
       setExerciseName(nextExerciseName)
     }
@@ -633,6 +1128,7 @@ export default function Training() {
     lastSyncedRoutineSetRef.current = nextSetKey
     lastRepCountRef.current = 0
     lastCompletedSetRef.current = ''
+    resetRepCounter?.()
     setTimedExerciseSeconds(0)
   }, [currentSetValue, routineCurrentExerciseName, setsTargetValue])
 
@@ -645,13 +1141,13 @@ export default function Training() {
     if (!firstDay) return
 
     setSelectedRoutineDay(firstDay)
-    setSelectedRoutineDayId(firstDay.day_id || firstDay.id || firstDay.day_number || null)
+    setSelectedRoutineDayId(resolveRoutineDayNumber(firstDay))
   }, [routineDayState, savedRoutineDays, selectedRoutineDayId])
 
   const handleSelectRoutineDay = (day) => {
     if (!day) return
     setSelectedRoutineDay(day)
-    const nextDayId = day.day_number || day.day_id || day.id || null
+    const nextDayId = resolveRoutineDayNumber(day)
     setSelectedRoutineDayId(nextDayId)
     hasManualExerciseSelectionRef.current = false
 
@@ -693,11 +1189,13 @@ export default function Training() {
     repCount,
     repPlan,
     squatValidation,
+    resetRepCounter,
   } = useLivePose({
     videoRef,
     canvasRef,
     isRunning: isSessionLive && isCameraActive && !isSessionPaused && !isSetRestActive,
     exerciseMode: poseExerciseMode,
+    exerciseLabel: activeExercise.name,
     enablePose: requiresPose,
     curlArmSide: curlStartArm,
     curlRepsPerArm,
@@ -707,7 +1205,6 @@ export default function Training() {
     error: handError,
     isOkGesture,
     gestureConfidence,
-    isPalmOpenGesture,
   } = useHandGesture({
     videoRef,
     isRunning: shouldTrackHands,
@@ -718,6 +1215,7 @@ export default function Training() {
     if (!duration) return
 
     lastRepCountRef.current = 0
+    resetRepCounter?.()
     setTimedExerciseSeconds(0)
     setIsSetResting(true)
     setRestCountdown(duration)
@@ -730,28 +1228,23 @@ export default function Training() {
     })
   }, [])
 
-  useEffect(() => {
-    if (!isSessionLive || !isCameraActive || isSetRestActive) return
-    if (!isPalmOpenGesture) return
+  const handleStartNextSeries = useCallback(() => {
+    if (!isCurrentSetCompleted || isCurrentExerciseCompleted) return
 
-    const now = Date.now()
-    if (now - lastGestureToggleRef.current < 1600) return
-    lastGestureToggleRef.current = now
-
-    setIsSessionPaused((current) => {
-      const nextValue = !current
-      queueMicrotask(() => {
-        setNotice({
-          tone: nextValue ? 'info' : 'success',
-          title: nextValue ? 'Pausa activada' : 'Sesión reanudada',
-          message: nextValue
-            ? 'Palma abierta detectada. La cámara queda activa, pero el conteo se pausa hasta una nueva palma abierta.'
-            : 'Palma abierta detectada otra vez. La sesión continúa.',
-        })
+    lastRepCountRef.current = 0
+    lastCompletedSetRef.current = ''
+    resetRepCounter?.()
+    setTimedExerciseSeconds(0)
+    setIsSetResting(false)
+    setRestCountdown(0)
+    queueMicrotask(() => {
+      setNotice({
+        tone: 'info',
+        title: 'Siguiente serie',
+        message: `Prepara ${formatSetLabel(Math.min(currentSeriesValue + 1, plannedSeriesValue), plannedSeriesValue)} de ${activeExercise.name}.`,
       })
-      return nextValue
     })
-  }, [isCameraActive, isPalmOpenGesture, isSessionLive, isSetRestActive])
+  }, [activeExercise.name, currentSeriesValue, isCurrentExerciseCompleted, isCurrentSetCompleted, plannedSeriesValue, resetRepCounter])
 
   useEffect(() => {
     if (!isSetRestActive || !isSessionLive || !isCameraActive || isSessionPaused) return undefined
@@ -813,10 +1306,14 @@ export default function Training() {
     void completeRoutineSet(token, selectedRoutineDayId, {
       exercise_id: routineCurrentExerciseState.id || routineCurrentExerciseState.exercise_id || null,
       exercise_name: exerciseName,
+      exercise_mode: exerciseCountMode,
+      tracking_mode: trackingMode,
       current_set: currentSetValue,
       sets_target: setsTargetValue,
       reps_completed_current_set: timedTargetSeconds,
       reps_target_value: timedTargetSeconds,
+      duration_seconds: timedTargetSeconds,
+      seconds_elapsed: timedExerciseSeconds,
       client_event_id: createClientEventId(),
     })
       .then((data) => {
@@ -829,21 +1326,31 @@ export default function Training() {
           null
         const responseExerciseStatus = responseExercise?.status || null
         if (shouldRestBeforeNextSet) {
+          const copy = getSetCompletionCopy({
+            currentSet: currentSetValue,
+            targetSets: setsTargetValue,
+            restSeconds: restSecondsValue,
+            isCompleted: responseExerciseStatus === 'completed',
+          })
           setNotice({
             tone: 'success',
-            title: 'Serie completada',
-            message: `Descanso antes de la siguiente serie: ${formatDuration(restSecondsValue)}.`,
+            title: copy.title,
+            message: copy.message,
           })
           beginSetRest(restSecondsValue)
         } else {
+          resetRepCounter?.()
           setTimedExerciseSeconds(0)
+          const copy = getSetCompletionCopy({
+            currentSet: currentSetValue,
+            targetSets: setsTargetValue,
+            restSeconds: restSecondsValue,
+            isCompleted: responseExerciseStatus === 'completed',
+          })
           setNotice({
             tone: 'success',
-            title: responseExerciseStatus === 'completed' ? 'Ejercicio completado' : 'Serie completada',
-            message:
-              responseExerciseStatus === 'completed'
-                ? `${exerciseName} quedó guardado en el backend como completado.`
-                : 'La siguiente serie queda lista.',
+            title: copy.title,
+            message: copy.message,
           })
         }
       })
@@ -870,7 +1377,6 @@ export default function Training() {
       setIsSessionPaused(false)
       setIsSetResting(false)
       setRestCountdown(0)
-      lastGestureToggleRef.current = 0
       stopCamera()
       return
     }
@@ -880,7 +1386,6 @@ export default function Training() {
     setIsSessionPaused(false)
     setIsSetResting(false)
     setRestCountdown(0)
-    lastGestureToggleRef.current = 0
   }
 
   const statusMessage = getStatusMessage({
@@ -953,7 +1458,14 @@ export default function Training() {
 
   useEffect(() => {
     if (!requiresPose) return
-    const feedback = squatValidation?.feedback || insights.feedback || ''
+    const feedback = formatPoseFeedbackMessage({
+      message: squatValidation?.feedback || insights.feedback || '',
+      requiresPose,
+      isValid: Boolean(squatValidation?.isValid),
+      trackingMode,
+      exerciseName: activeExercise.name,
+      exerciseCountMode,
+    })
     if (!feedback || feedback === lastFeedbackRef.current) return
 
     lastFeedbackRef.current = feedback
@@ -974,13 +1486,13 @@ export default function Training() {
                   ? 'Plank detectado'
                   : 'Aviso de core'
               : !squatValidation?.hasRequiredView
-                ? trackingMode === 'press'
+                ? trackingMode === 'press' || trackingMode === 'russian'
                   ? 'Press incompleto'
                   : trackingMode === 'squat'
                     ? 'Pierna incompleta'
                     : 'Cuerpo incompleto'
                 : squatValidation?.isValid
-                  ? trackingMode === 'press'
+                  ? trackingMode === 'press' || trackingMode === 'russian'
                     ? 'Press detectado'
                     : trackingMode === 'squat'
                       ? 'Sentadilla detectada'
@@ -989,7 +1501,7 @@ export default function Training() {
         message: feedback,
       })
     })
-  }, [insights.feedback, requiresPose, squatValidation?.feedback, squatValidation?.hasRequiredView, squatValidation?.isValid, trackingMode])
+  }, [activeExercise.name, exerciseCountMode, insights.feedback, requiresPose, squatValidation?.feedback, squatValidation?.hasRequiredView, squatValidation?.isValid, trackingMode])
 
   useEffect(() => {
     if (!requiresPose) return
@@ -1024,6 +1536,8 @@ export default function Training() {
     void recordRoutineReps(token, selectedRoutineDayId, {
       exercise_id: routineCurrentExerciseState.id || routineCurrentExerciseState.exercise_id || null,
       exercise_name: exerciseName,
+      exercise_mode: exerciseCountMode,
+      tracking_mode: trackingMode,
       current_set: currentSetValue,
       sets_target: setsTargetValue,
       reps_delta: delta,
@@ -1046,14 +1560,18 @@ export default function Training() {
         void completeRoutineSet(token, selectedRoutineDayId, {
           exercise_id: routineCurrentExerciseState.id || routineCurrentExerciseState.exercise_id || null,
           exercise_name: exerciseName,
+          exercise_mode: exerciseCountMode,
+          tracking_mode: trackingMode,
           current_set: currentSetValue,
           sets_target: setsTargetValue,
           reps_completed_current_set: repCount,
           reps_target_value: targetReps,
           client_event_id: createClientEventId(),
         })
-          .then((data) => {
-            if (data) setRoutineProgress(data)
+      .then((data) => {
+            if (data) {
+              setRoutineProgress((currentProgress) => mergeRoutineProgressPayload(currentProgress, data))
+            }
             const responseExercise =
               data?.current_day?.current_exercise ||
               data?.currentDay?.currentExercise ||
@@ -1062,20 +1580,30 @@ export default function Training() {
               null
             const responseExerciseStatus = responseExercise?.status || null
             if (shouldRestBeforeNextSet) {
+              const copy = getSetCompletionCopy({
+                currentSet: currentSetValue,
+                targetSets: setsTargetValue,
+                restSeconds: restSecondsValue,
+                isCompleted: responseExerciseStatus === 'completed',
+              })
               setNotice({
                 tone: 'success',
-                title: 'Serie completada',
-                message: `Descanso antes de la siguiente serie: ${formatDuration(restSecondsValue)}.`,
+                title: copy.title,
+                message: copy.message,
               })
               beginSetRest(restSecondsValue)
             } else {
+              resetRepCounter?.()
+              const copy = getSetCompletionCopy({
+                currentSet: currentSetValue,
+                targetSets: setsTargetValue,
+                restSeconds: restSecondsValue,
+                isCompleted: responseExerciseStatus === 'completed',
+              })
               setNotice({
                 tone: 'success',
-                title: responseExerciseStatus === 'completed' ? 'Ejercicio completado' : 'Serie completada',
-                message:
-                  responseExerciseStatus === 'completed'
-                    ? `${exerciseName} quedó guardado en el backend como completado.`
-                    : 'La siguiente serie queda lista.',
+                title: copy.title,
+                message: copy.message,
               })
             }
           })
@@ -1106,7 +1634,7 @@ export default function Training() {
       setNotice({
         tone: 'success',
         title: 'Serie completada',
-        message: `Terminaste ${curlRepsPerArm} con el ${ARM_LABELS[curlStartArm]} y ${curlRepsPerArm} con el otro brazo.`,
+        message: `Terminaste ${curlRepsPerArm} con el primer brazo y ${curlRepsPerArm} con el segundo.`,
       })
     })
   }, [curlRepsPerArm, curlStartArm, repPlan?.isComplete, trackingMode])
@@ -1147,38 +1675,65 @@ export default function Training() {
       })
   }, [activeRoutineDay?.day_name, activeRoutineDay?.day_number, routineExerciseEntries, selectedRoutineDayId, selectedTrainingPlan, syncRoutineProgressFromResponse, token])
 
-  const handleCompleteRoutineDay = useCallback(async () => {
-    if (!token || !selectedRoutineDayId || !routineExerciseEntries.length) return
+  const handleCompleteCurrentExercise = useCallback(async () => {
+    if (!token || !selectedRoutineDayId || !routineCurrentExerciseState) return
 
     try {
       setIsCompletingRoutine(true)
       setRoutineError(null)
-      const data = await completeRoutineDay(token, selectedRoutineDayId, {
-        completed_exercises_count: routineExerciseEntries.length,
-        total_exercises: routineExerciseEntries.length,
+      const data = await completeRoutineSet(token, selectedRoutineDayId, {
+        exercise_id: routineCurrentExerciseState.id || routineCurrentExerciseState.exercise_id || null,
+        exercise_name: exerciseName,
+        exercise_mode: exerciseCountMode,
+        tracking_mode: trackingMode,
+        current_set: currentSetValue,
+        sets_target: setsTargetValue,
+        reps_completed_current_set: isTimedExercise ? timedTargetSeconds : repCount,
+        reps_target_value: isTimedExercise ? timedTargetSeconds : repsTargetValue,
+        duration_seconds: isTimedExercise ? timedTargetSeconds : null,
+        seconds_elapsed: isTimedExercise ? timedExerciseSeconds : null,
         client_event_id: createClientEventId(),
       })
 
       if (data) {
         syncRoutineProgressFromResponse(data)
-        saveCompletedRoutineSummary({
-          day: data,
-          plan: selectedTrainingPlan,
-          summary: data?.current_day?.session_summary || data?.currentDay?.sessionSummary || data?.session_summary || data?.sessionSummary || null,
-          exercisesCount: routineExerciseEntries.length,
-        })
+        const responseExercise =
+          data?.current_day?.current_exercise ||
+          data?.currentDay?.currentExercise ||
+          data?.current_exercise ||
+          data?.currentExercise ||
+          null
+        const responseExerciseStatus = responseExercise?.status || null
         setNotice({
           tone: 'success',
-          title: 'Rutina completada',
-          message: `Se guardó ${activeRoutineDay?.day_name || 'la rutina de hoy'} con ${routineExerciseEntries.length} ejercicios completados.`,
+          title: responseExerciseStatus === 'completed' ? 'Ejercicio completado' : 'Serie guardada',
+          message: responseExerciseStatus === 'completed'
+            ? `Se guardó ${activeExercise.name} como completado.`
+            : `Se guardó la serie actual de ${activeExercise.name}.`,
         })
       }
     } catch (error) {
-      setRoutineError(error.response?.data?.detail || 'No se pudo completar la rutina del día')
+      setRoutineError(error.response?.data?.detail || 'No se pudo completar el ejercicio')
     } finally {
       setIsCompletingRoutine(false)
     }
-  }, [activeRoutineDay?.day_name, routineExerciseEntries.length, selectedRoutineDayId, selectedTrainingPlan, syncRoutineProgressFromResponse, token])
+  }, [
+    activeExercise.name,
+    currentSetValue,
+    exerciseName,
+    exerciseCountMode,
+    isTimedExercise,
+    repCount,
+    repsTargetValue,
+    routineCurrentExerciseState,
+    selectedRoutineDayId,
+    setsTargetValue,
+    syncRoutineProgressFromResponse,
+    timedExerciseSeconds,
+    timedTargetSeconds,
+    token,
+    trackingMode,
+  ])
 
   return (
     <DashboardLayout>
@@ -1224,12 +1779,46 @@ export default function Training() {
               </div>
             </div>
 
-            {routineWeekDays.length > 0 && (
-              <div className="mt-4">
-                <p className="text-[10px] font-mono uppercase tracking-[0.24em] text-gym-cyan">
-                  Semana de entrenamiento
+          </section>
+        )}
+
+        {activeRoutineDay && (
+          <section className="rounded-3xl border border-gym-cyan/20 bg-gym-sidebar p-4 sm:p-5">
+            <div className="grid gap-4">
+              <div>
+                <p className="text-[10px] font-mono uppercase tracking-[0.28em] text-gym-cyan">
+                  Ejercicios del día
                 </p>
-                <div className="mt-3 flex flex-wrap gap-2">
+                <p className="mt-2 text-sm text-gym-muted">
+                  {activeRoutineDay.focus || 'Ejercicios del plan listos para empezar'}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-4 rounded-[1.5rem] border border-gym-cyan/15 bg-[linear-gradient(180deg,rgba(18,28,50,0.92)_0%,rgba(10,16,29,0.96)_100%)] p-4 shadow-[0_14px_40px_rgba(0,0,0,0.18)]">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div className="max-w-2xl">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-[10px] font-mono uppercase tracking-[0.24em] text-gym-cyan">
+                      Cambiar día
+                    </p>
+                    <span className="rounded-full border border-white/8 bg-white/5 px-2.5 py-1 text-[9px] font-mono uppercase tracking-[0.2em] text-gym-muted">
+                      {routineExerciseEntries.length} ejercicios activos
+                    </span>
+                    {activeRoutineDay?.day_number != null && (
+                      <span className="rounded-full border border-gym-cyan/25 bg-gym-cyan/10 px-2.5 py-1 text-[9px] font-mono uppercase tracking-[0.2em] text-gym-cyan">
+                        D{activeRoutineDay.day_number}
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-2 text-sm text-gym-muted">
+                    Selecciona un día para cargar sus ejercicios y trabajar solo con ese bloque.
+                  </p>
+                </div>
+              </div>
+
+              {routineWeekDays.length > 0 && (
+                <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                   {routineWeekDays.map((day) => {
                     const isActive = Number(activeRoutineDay?.day_number) === Number(day.day_number)
                     return (
@@ -1237,87 +1826,30 @@ export default function Training() {
                         key={day.day_number}
                         type="button"
                         onClick={() => handleSelectRoutineDay(day)}
-                        className={`rounded-full border px-3 py-1.5 text-xs font-mono uppercase tracking-[0.18em] transition-colors ${
+                        className={`min-h-[6.5rem] rounded-2xl border px-4 py-3 text-left transition-all ${
                           isActive
-                            ? 'border-gym-cyan bg-gym-cyan/10 text-white'
-                            : 'border-gym-border bg-gym-accent text-gym-muted hover:border-gym-cyan/40 hover:text-white'
+                            ? 'border-gym-cyan bg-gym-cyan/10 text-white shadow-[0_0_0_1px_rgba(0,229,255,0.15),0_12px_25px_rgba(0,229,255,0.08)]'
+                            : 'border-gym-border bg-gym-sidebar text-gym-muted hover:-translate-y-0.5 hover:border-gym-cyan/40 hover:text-white'
                         }`}
                       >
-                        D{day.day_number} · {day.day_name || `Día ${day.day_number}`}
+                        <div className="flex items-start justify-between gap-3">
+                          <span className="text-[10px] font-mono uppercase tracking-[0.24em] text-inherit/70">
+                            D{day.day_number}
+                          </span>
+                          {isActive && (
+                            <span className="rounded-full border border-gym-cyan/30 bg-gym-cyan/15 px-2 py-0.5 text-[9px] font-mono uppercase tracking-[0.16em] text-gym-cyan">
+                              Activo
+                            </span>
+                          )}
+                        </div>
+                        <p className="mt-2 line-clamp-2 font-semibold leading-6 text-white">
+                          {day.day_name || `Día ${day.day_number}`}
+                        </p>
                       </button>
                     )
                   })}
                 </div>
-              </div>
-            )}
-          </section>
-        )}
-
-        {activeRoutineDay && (
-          <section className="rounded-3xl border border-gym-cyan/20 bg-gym-sidebar p-4">
-            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-              <div>
-                <p className="text-[10px] font-mono uppercase tracking-[0.28em] text-gym-cyan">
-                  Rutina diaria
-                </p>
-                <h2 className="mt-1 font-display text-2xl font-bold text-white">
-                  {activeRoutineDay.day_name || activeRoutineDay.day_label || 'Rutina del día'}
-                </h2>
-                <p className="mt-2 text-sm text-gym-muted">
-                  {activeRoutineDay.focus || 'Ejercicios del plan listos para empezar'}
-                </p>
-                {selectedTrainingPlan && (
-                  <p className="mt-2 text-xs font-mono uppercase tracking-[0.18em] text-gym-muted">
-                    {selectedTrainingPlan.plan_type || 'Plan'} · Variante {selectedTrainingPlan.variant || selectedTrainingPlan.selectedVariant || 'A'}
-                  </p>
-                )}
-              </div>
-              <div className="rounded-2xl border border-gym-border bg-gym-accent px-4 py-3 text-sm text-white">
-                <div className="text-[10px] font-mono uppercase tracking-[0.2em] text-gym-muted">Sesión</div>
-                <div className="mt-1 font-semibold">
-                  {routineCurrentExerciseName
-                    ? routineCurrentExerciseName
-                    : `${routineExerciseEntries.length} ejercicios`}
-                </div>
-                <div className="mt-2 space-y-1 text-[10px] font-mono uppercase tracking-[0.16em] text-gym-muted">
-                  <p>
-                    {isSetRestActive
-                      ? `Descanso ${formatDuration(restCountdown)}`
-                      : isSessionPaused
-                        ? 'Pausada'
-                        : isRoutineCompleted
-                          ? 'Completada'
-                          : isRoutineActive
-                            ? 'En progreso'
-                            : 'Pendiente'}
-                  </p>
-                  {currentSetValue != null && setsTargetValue != null && (
-                    <p>Serie {currentSetValue}/{setsTargetValue}</p>
-                  )}
-                  {isTimedExercise ? (
-                    <p>Tiempo {formatCountdown(timedRemainingSeconds)}</p>
-                  ) : repsTargetValue != null ? (
-                    <p>Reps {repsCompletedValue}/{repsTargetValue}</p>
-                  ) : null}
-                  {isCurrentExerciseCompleted ? (
-                    <p className="text-gym-green">Ejercicio completado</p>
-                  ) : isCurrentSetCompleted ? (
-                    <p className="text-gym-cyan">Serie completada</p>
-                  ) : null}
-                  {restSecondsValue > 0 && !isSetRestActive && currentSetValue != null && setsTargetValue != null && currentSetValue < setsTargetValue && (
-                    <p>Descanso por serie: {formatDuration(restSecondsValue)}</p>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-4 rounded-2xl border border-gym-border bg-gym-accent/70 px-4 py-3">
-              <p className="text-[10px] font-mono uppercase tracking-[0.24em] text-gym-cyan">
-                Debes completar hoy
-              </p>
-              <p className="mt-1 text-sm text-gym-muted">
-                {routineExerciseEntries.length} ejercicios en {activeRoutineDay.day_name || `Día ${activeRoutineDay.day_number || ''}`}.
-              </p>
+              )}
             </div>
 
             <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -1331,11 +1863,11 @@ export default function Training() {
               </button>
               <button
                 type="button"
-                onClick={handleCompleteRoutineDay}
-                disabled={!token || !selectedRoutineDayId || !routineExerciseEntries.length || isRoutineCompleted || isCompletingRoutine}
+                onClick={handleCompleteCurrentExercise}
+                disabled={!token || !selectedRoutineDayId || !routineCurrentExerciseState || isCurrentExerciseCompleted || isCompletingRoutine}
                 className="rounded-xl border border-gym-border bg-gym-accent px-4 py-2 text-xs font-mono uppercase tracking-[0.18em] text-gym-muted transition-colors disabled:cursor-not-allowed disabled:opacity-50 hover:border-gym-cyan/40 hover:text-white"
               >
-                {isCompletingRoutine ? 'Guardando...' : 'Guardar completada'}
+                {isCompletingRoutine ? 'Guardando...' : 'Completar ejercicio'}
               </button>
               {routineLoading && (
                 <span className="text-xs font-mono uppercase tracking-[0.18em] text-gym-muted">Sincronizando progreso...</span>
@@ -1345,7 +1877,7 @@ export default function Training() {
               )}
             </div>
             <p className="mt-2 text-xs font-mono uppercase tracking-[0.16em] text-gym-muted">
-              Palma abierta pausa o reanuda la sesión. OK sigue siendo solo para iniciar el plank.
+              OK sigue siendo solo para iniciar el plank. La pausa se controla con el botón.
             </p>
 
             {hasFinalSummary && (
@@ -1396,32 +1928,39 @@ export default function Training() {
               </div>
             )}
 
-            {savedRoutineDays.length > 0 && (
-              <div className="mt-4 flex flex-wrap gap-2">
-                {savedRoutineDays.map((day) => {
-                  const isActive = Number(activeRoutineDay.day_number) === Number(day.day_number)
-                  return (
-                    <button
-                      key={day.day_number}
-                      type="button"
-                      onClick={() => handleSelectRoutineDay(day)}
-                      className={`rounded-full border px-3 py-1.5 text-xs font-mono uppercase tracking-[0.18em] transition-colors ${
-                        isActive
-                          ? 'border-gym-cyan bg-gym-cyan/10 text-white'
-                          : 'border-gym-border bg-gym-accent text-gym-muted hover:border-gym-cyan/40 hover:text-white'
-                      }`}
-                    >
-                      D{day.day_number} · {day.day_name || `Día ${day.day_number}`}
-                    </button>
-                  )
-                })}
-              </div>
-            )}
-
             <div className="mt-4">
-              <p className="text-[10px] font-mono uppercase tracking-[0.24em] text-gym-cyan">
-                Detalle del ejercicio activo
-              </p>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                  <p className="text-[10px] font-mono uppercase tracking-[0.24em] text-gym-cyan">
+                    Cambiar ejercicio
+                  </p>
+                  <p className="mt-1 text-xs font-mono uppercase tracking-[0.18em] text-gym-muted">
+                    {routineExerciseEntries.length > 0
+                      ? `Ejercicio ${Math.max(activeRoutineExerciseIndex + 1, 1)}/${routineExerciseEntries.length}`
+                      : 'Sin ejercicios cargados'}
+                  </p>
+                </div>
+                {showExerciseDebugControls && (
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={handlePreviousExercise}
+                      disabled={!routineExerciseEntries.length}
+                      className="rounded-xl border border-gym-border bg-gym-accent px-3 py-2 text-[10px] font-mono uppercase tracking-[0.18em] text-gym-muted transition-colors disabled:cursor-not-allowed disabled:opacity-50 hover:border-gym-cyan/40 hover:text-white"
+                    >
+                      Anterior
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleNextExercise}
+                      disabled={!routineExerciseEntries.length}
+                      className="rounded-xl border border-gym-cyan/30 bg-gym-cyan/10 px-3 py-2 text-[10px] font-mono uppercase tracking-[0.18em] text-gym-cyan transition-colors disabled:cursor-not-allowed disabled:opacity-50 hover:bg-gym-cyan/15"
+                    >
+                      Siguiente
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
             <div className="mt-3 grid max-h-72 gap-2 overflow-y-auto pr-1 sm:grid-cols-2 xl:grid-cols-3">
               {routineExerciseEntries.map((exercise, index) => (
@@ -1464,47 +2003,67 @@ export default function Training() {
                       exercise.time ??
                       exercise.duration ??
                       0,
-                  )
+                  ) || getExerciseDefaultDurationSeconds(exercise)
 
                   return (
-                <button
+                  <button
                   key={`${activeRoutineDay.day_label || activeRoutineDay.day_name || 'day'}-${index}-${displayName}`}
                   type="button"
                   onClick={() => {
                     hasManualExerciseSelectionRef.current = true
-                    const normalized = TRAINING_EXERCISES_BY_NAME[displayName]
-                    if (normalized) {
-                      setExerciseName(normalized.name)
-                    } else {
-                      setExerciseName(displayName)
-                    }
+                    setExerciseName(displayName)
                   }}
                   aria-pressed={isActiveExercise}
-                  className={`rounded-2xl border px-3 py-3 text-left transition-all ${
+                  className={`group relative overflow-hidden rounded-2xl border px-3 py-3 text-left transition-all duration-300 ${
                     isActiveExercise
-                      ? 'relative scale-[1.01] border-gym-cyan bg-gym-cyan/15 text-white shadow-[0_0_0_1px_rgba(0,229,255,0.35),0_0_30px_rgba(0,229,255,0.18)] ring-1 ring-gym-cyan/30'
+                      ? 'scale-[1.01] border-gym-cyan bg-[linear-gradient(180deg,rgba(0,229,255,0.14)_0%,rgba(7,16,30,0.98)_100%)] text-white shadow-[0_0_0_1px_rgba(0,229,255,0.35),0_0_30px_rgba(0,229,255,0.18)] ring-1 ring-gym-cyan/30'
                       : isCurrentExerciseOnly
-                        ? 'border-gym-cyan/40 bg-gym-accent/90 text-white shadow-[0_0_0_1px_rgba(0,229,255,0.12)]'
-                        : 'border-gym-border bg-gym-accent text-gym-muted hover:border-gym-cyan/40 hover:text-white'
+                        ? 'border-gym-cyan/40 bg-[linear-gradient(180deg,rgba(8,26,45,0.95)_0%,rgba(11,18,34,0.98)_100%)] text-white shadow-[0_0_0_1px_rgba(0,229,255,0.12)]'
+                        : 'border-gym-border bg-[linear-gradient(180deg,rgba(13,20,34,0.98)_0%,rgba(8,13,24,0.98)_100%)] text-gym-muted hover:-translate-y-0.5 hover:border-gym-cyan/40 hover:text-white hover:shadow-[0_18px_30px_rgba(0,0,0,0.28)]'
                   }`}
                 >
                   {(isActiveExercise || isCurrentExerciseOnly) && (
                     <span className="absolute left-0 top-0 h-full w-1 rounded-l-2xl bg-gym-cyan shadow-[0_0_16px_rgba(0,229,255,0.6)]" />
                   )}
-
-                  <ExerciseGuideImage
-                    key={`${displayName}-${imageUrl || 'no-image'}`}
-                    src={imageUrl}
-                    alt={displayName}
-                    wrapperClassName="mb-2 overflow-hidden rounded-xl border border-white/5 bg-gym-sidebar"
-                    imageClassName="h-24 w-full object-cover"
-                    placeholderClassName="h-24"
-                  />
+                  <div className="pointer-events-none absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-transparent via-gym-cyan/80 to-transparent opacity-70" />
+                  <div className="relative z-10 mb-2 flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-mono uppercase tracking-[0.22em] text-gym-muted">
+                        {exerciseCountModeLocal === 'timer'
+                          ? 'Timer'
+                          : exerciseCountModeLocal === 'hold'
+                            ? 'Hold'
+                            : exercise.trackingMode === 'manual'
+                              ? 'Guía'
+                              : exercise.trackingMode === 'core'
+                                ? 'Core'
+                                : 'Live'}
+                      </p>
+                      <p className="mt-2 truncate font-display text-lg font-bold leading-tight text-white">
+                        {displayName}
+                      </p>
+                      <p className="mt-1 text-[10px] font-mono uppercase tracking-[0.18em] text-gym-cyan/90">
+                        {exercise?.category || exercise?.muscle_group || 'Ejercicio del plan'}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 flex-col items-end gap-1">
+                      {(isActiveExercise || isCurrentExerciseOnly) && (
+                        <span className="rounded-full border border-gym-cyan/40 bg-gym-cyan/15 px-2.5 py-1 text-[8px] font-mono uppercase tracking-[0.22em] text-gym-cyan backdrop-blur">
+                          En foco
+                        </span>
+                      )}
+                      {exercise.status === 'completed' && (
+                        <span className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-2 py-1 text-[8px] font-mono uppercase tracking-[0.18em] text-emerald-200">
+                          Completado
+                        </span>
+                      )}
+                    </div>
+                  </div>
 
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
-                        <p className="truncate text-sm font-semibold text-white">
+                        <p className="truncate text-sm font-semibold text-white drop-shadow-[0_1px_0_rgba(0,0,0,0.35)]">
                           {displayName}
                         </p>
                         {isActiveExercise && (
@@ -1532,17 +2091,26 @@ export default function Training() {
                         {getExerciseDisplayGroup(exercise)}
                       </p>
                       <p className={`mt-1 text-[10px] font-mono uppercase tracking-[0.16em] ${isActiveExercise || isCurrentExerciseOnly ? 'text-white/80' : 'text-gym-muted/80'}`}>
-                        {exerciseCountModeLocal === 'timer'
-                          ? `Tiempo ${formatCountdown(completedRepsOrSeconds || plannedDurationSeconds)}/${formatCountdown(plannedDurationSeconds || completedRepsOrSeconds)}`
-                          : `Series ${completedSets || 0}/${plannedSets || 0} · Reps ${completedRepsOrSeconds || 0}/${plannedRepsOrSeconds || 0}`}
+                        {plannedSets > 0 ? `${formatSetLabel(completedSets || 0, plannedSets)} · ` : ''}
+                        {exerciseCountModeLocal === 'timer' || exerciseCountModeLocal === 'hold'
+                          ? `${getExerciseMetricLabel(exerciseCountModeLocal)} ${formatCountdown(completedRepsOrSeconds || timedTargetSeconds || plannedDurationSeconds)}/${formatCountdown(timedTargetSeconds || plannedDurationSeconds || completedRepsOrSeconds)}`
+                          : `${getExerciseMetricLabel(exerciseCountModeLocal)} ${completedRepsOrSeconds || 0}/${plannedRepsOrSeconds || 0}`}
                       </p>
                     </div>
-                    {(exercise.sets || exercise.reps) && (
-                      <div className={`flex flex-col items-end text-[10px] font-mono uppercase tracking-[0.16em] ${isActiveExercise || isCurrentExerciseOnly ? 'text-gym-cyan' : 'text-gym-cyan'}`}>
-                        {exercise.sets && <span>{exercise.sets} series</span>}
-                        {exercise.reps && <span>{exercise.reps} reps</span>}
-                      </div>
-                    )}
+                    <div className="flex flex-col items-end gap-1 text-[10px] font-mono uppercase tracking-[0.16em] text-gym-cyan">
+                      {plannedSets > 0 && (
+                        <span className="rounded-full border border-white/8 bg-white/5 px-2 py-1">
+                          {formatSetLabel(completedSets || 0, plannedSets)}
+                        </span>
+                      )}
+                      {(exerciseCountModeLocal === 'timer' || exerciseCountModeLocal === 'hold' || plannedRepsOrSeconds > 0) && (
+                        <span className="rounded-full border border-white/8 bg-white/5 px-2 py-1">
+                          {exerciseCountModeLocal === 'timer' || exerciseCountModeLocal === 'hold'
+                            ? `${getExerciseMetricLabel(exerciseCountModeLocal)} ${formatCountdown(timedTargetSeconds || plannedDurationSeconds)}`
+                            : `${getExerciseMetricLabel(exerciseCountModeLocal)} ${plannedRepsOrSeconds}`}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </button>
                   )
@@ -1710,26 +2278,68 @@ export default function Training() {
                 {isTimedExercise ? (
                   <div className="rounded-2xl border border-gym-border bg-gym-accent px-4 py-4 text-center">
                     <p className="text-[10px] font-mono uppercase tracking-[0.2em] text-gym-muted">
-                      Cronómetro
+                      {isHoldExercise ? 'Sostén' : isManualTimedExercise ? 'Cronómetro manual' : 'Cronómetro'}
                     </p>
+                    {isManualTimedExercise && (
+                      <div className="mt-3 rounded-2xl border border-white/8 bg-slate-950/45 px-3 py-3 text-left">
+                        <div className="flex items-end justify-between gap-3">
+                          <div>
+                            <p className="text-[10px] font-mono uppercase tracking-[0.18em] text-gym-muted">
+                              Duración
+                            </p>
+                            <p className="mt-1 text-xs text-white/70">
+                              Elige los minutos del ejercicio manual.
+                            </p>
+                          </div>
+                          <label className="flex items-center gap-2">
+                            <input
+                              type="number"
+                              min="1"
+                              max="60"
+                              step="1"
+                              value={manualTimerMinutes}
+                              onChange={(event) => {
+                                const nextMinutes = Math.max(1, Math.min(60, Number(event.target.value) || 1))
+                                setManualTimerMinutesByExercise((current) => ({
+                                  ...current,
+                                  [activeExerciseTimerKey]: nextMinutes,
+                                }))
+                                setTimedExerciseSeconds(0)
+                              }}
+                              className="w-20 rounded-xl border border-gym-border bg-gym-sidebar px-3 py-2 text-center text-sm font-semibold text-white outline-none transition-colors focus:border-gym-cyan"
+                            />
+                            <span className="text-[10px] font-mono uppercase tracking-[0.18em] text-gym-muted">
+                              min
+                            </span>
+                          </label>
+                        </div>
+                      </div>
+                    )}
                     <p className="mt-2 font-display text-5xl font-bold leading-none text-white">
                       {formatCountdown(timedRemainingSeconds)}
                     </p>
-                    <p className="mt-2 text-[10px] font-mono uppercase tracking-[0.18em] text-gym-cyan">
-                      Serie {currentSetValue || 1}/{setsTargetValue || 1}
-                    </p>
-                  </div>
-                ) : isTimedExercise && !isPlankExercise ? (
-                  <div className="rounded-2xl border border-gym-border bg-gym-accent px-4 py-4 text-center">
-                    <p className="text-[10px] font-mono uppercase tracking-[0.2em] text-gym-muted">
-                      Tiempo
-                    </p>
-                    <p className="mt-2 font-display text-5xl font-bold leading-none text-white">
-                      {formatCountdown(timedRemainingSeconds)}
-                    </p>
-                    <p className="mt-2 text-[10px] font-mono uppercase tracking-[0.18em] text-gym-cyan">
-                      Serie {currentSetValue || 1}/{setsTargetValue || 1}
-                    </p>
+                    <div className="mt-3 flex flex-wrap items-center justify-center gap-2 text-[10px] font-mono uppercase tracking-[0.18em]">
+                      <span className="rounded-full border border-gym-cyan/30 bg-gym-cyan/10 px-3 py-1 text-gym-cyan">
+                        {formatSetLabel(currentSeriesValue, plannedSeriesValue)}
+                      </span>
+                      <span className="rounded-full border border-white/8 bg-white/5 px-3 py-1 text-white/80">
+                        Total {formatCountdown(timedTargetSeconds)}
+                      </span>
+                    </div>
+                    {isCurrentSetCompleted && !isCurrentExerciseCompleted && (
+                      <button
+                        type="button"
+                        onClick={handleStartNextSeries}
+                        className="mt-4 inline-flex items-center justify-center rounded-xl border border-gym-cyan/30 bg-gym-cyan/10 px-4 py-2 text-xs font-mono uppercase tracking-[0.18em] text-gym-cyan transition-colors hover:bg-gym-cyan/15"
+                      >
+                        {isSetRestActive ? 'Continuar ahora' : 'Siguiente serie'}
+                      </button>
+                    )}
+                    {isManualTimedExercise && (
+                      <p className="mt-3 text-[10px] font-mono uppercase tracking-[0.18em] text-gym-muted">
+                        Recomendado entre 1 y 6 minutos.
+                      </p>
+                    )}
                   </div>
                 ) : exerciseCountMode === 'reps' ? (
                   <div className="rounded-2xl border border-gym-border bg-gym-accent px-4 py-4 text-center">
@@ -1737,30 +2347,69 @@ export default function Training() {
                       Repeticiones
                     </p>
                     <p className="mt-2 font-display text-5xl font-bold leading-none text-white">
-                      {repCount}
+                      {repCount}/{repsTargetValue || 0}
                     </p>
+                    <div className="mt-3 flex flex-wrap items-center justify-center gap-2 text-[10px] font-mono uppercase tracking-[0.18em]">
+                      <span className="rounded-full border border-gym-cyan/30 bg-gym-cyan/10 px-3 py-1 text-gym-cyan">
+                        {formatSetLabel(currentSeriesValue, plannedSeriesValue)}
+                      </span>
+                      <span className="rounded-full border border-white/8 bg-white/5 px-3 py-1 text-white/80">
+                        Objetivo {repsTargetValue || 0}
+                      </span>
+                    </div>
+                    {isCurrentSetCompleted && !isCurrentExerciseCompleted && (
+                      <button
+                        type="button"
+                        onClick={handleStartNextSeries}
+                        className="mt-4 inline-flex items-center justify-center rounded-xl border border-gym-cyan/30 bg-gym-cyan/10 px-4 py-2 text-xs font-mono uppercase tracking-[0.18em] text-gym-cyan transition-colors hover:bg-gym-cyan/15"
+                      >
+                        {isSetRestActive ? 'Continuar ahora' : 'Siguiente serie'}
+                      </button>
+                    )}
                   </div>
                 ) : null}
 
-                <div className="overflow-hidden rounded-2xl border border-gym-border bg-gym-accent">
-                  <div className="relative aspect-[16/10] bg-gym-sidebar">
-                    <ExerciseGuideImage
-                      key={`${activeExercise.name}-${getExerciseImageUrl(activeExercise) || 'no-image'}`}
-                      src={getExerciseImageUrl(activeExercise)}
-                      alt={activeExercise.name}
-                      wrapperClassName="h-full w-full"
-                      imageClassName="h-full w-full object-cover"
-                      placeholderClassName="h-full"
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-t from-slate-950/70 via-transparent to-transparent" />
-                  </div>
-                  <div className="px-4 py-3">
-                    <p className="text-[10px] font-mono uppercase tracking-[0.2em] text-gym-cyan">
-                      Guía visual
-                    </p>
-                    <p className="mt-1 font-display text-sm font-bold text-white">
-                      {activeExercise.name}
-                    </p>
+                <div className="overflow-hidden rounded-[1.75rem] border border-gym-border bg-[linear-gradient(180deg,rgba(13,20,34,0.96)_0%,rgba(8,13,24,0.98)_100%)] shadow-[0_20px_50px_rgba(0,0,0,0.28)]">
+                  <div className="flex min-h-[220px] flex-col justify-between gap-6 bg-[radial-gradient(circle_at_top,rgba(0,229,255,0.10),transparent_42%),linear-gradient(180deg,#101b2f_0%,#08101d_100%)] p-5 sm:min-h-[250px] sm:p-6">
+                    <div className="flex items-center gap-2">
+                      <span className="rounded-full border border-white/10 bg-slate-950/70 px-2.5 py-1 text-[9px] font-mono uppercase tracking-[0.22em] text-white/80 backdrop-blur">
+                        {exerciseCountMode === 'timer'
+                          ? 'Tiempo'
+                          : trackingMode === 'manual'
+                            ? 'Guía'
+                            : trackingMode === 'core'
+                              ? 'Core'
+                              : 'Seguimiento'}
+                      </span>
+                      {(isTimedExercise || trackingMode === 'curl') && (
+                        <span className="rounded-full border border-gym-cyan/30 bg-gym-cyan/15 px-2.5 py-1 text-[9px] font-mono uppercase tracking-[0.22em] text-gym-cyan backdrop-blur">
+                          En vivo
+                        </span>
+                      )}
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-mono uppercase tracking-[0.2em] text-gym-cyan/90">
+                        {activeExercise.category || activeExercise.muscle_group || 'Ejercicio del plan'}
+                      </p>
+                      <h3 className="mt-1 font-display text-2xl font-bold text-white">
+                        {activeExercise.name}
+                      </h3>
+                      <p className="mt-2 max-w-xl text-sm leading-6 text-gym-muted">
+                        La referencia visual se añadirá más adelante. Por ahora esta vista queda enfocada en el conteo y la validación del ejercicio.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 text-[10px] font-mono uppercase tracking-[0.16em] text-gym-muted">
+                      {(activeExercise.sets || setsTargetValue) && (
+                        <span className="rounded-full border border-white/8 bg-white/5 px-2 py-1 text-white/80">
+                          {activeExercise.sets || setsTargetValue || 0} series
+                        </span>
+                      )}
+                      {(activeExercise.reps || repsTargetValue) && (
+                        <span className="rounded-full border border-white/8 bg-white/5 px-2 py-1 text-white/80">
+                          {activeExercise.reps || repsTargetValue || 0} reps
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
 
@@ -1773,21 +2422,7 @@ export default function Training() {
                     <div className="mt-3 grid gap-3">
                       <label className="space-y-1">
                         <span className="block text-[10px] font-mono uppercase tracking-[0.18em] text-gym-muted">
-                          Brazo inicial
-                        </span>
-                        <select
-                          value={curlStartArm}
-                          onChange={(event) => setCurlStartArm(event.target.value)}
-                          className="w-full rounded-xl border border-gym-border bg-gym-sidebar px-3 py-2 text-sm text-white outline-none"
-                        >
-                          <option value="left">Izquierdo</option>
-                          <option value="right">Derecho</option>
-                        </select>
-                      </label>
-
-                      <label className="space-y-1">
-                        <span className="block text-[10px] font-mono uppercase tracking-[0.18em] text-gym-muted">
-                          Reps por brazo
+                          Reps totales
                         </span>
                         <input
                           type="number"
@@ -1800,7 +2435,7 @@ export default function Training() {
                       </label>
 
                       <p className="text-sm leading-6 text-white">
-                        Haz {curlRepsPerArm} con el {ARM_LABELS[curlStartArm]} y luego {curlRepsPerArm} con el otro brazo.
+                        Haz {curlRepsPerArm} con un brazo y luego {curlRepsPerArm} con el otro. Funciona en ambos lados.
                       </p>
                     </div>
                   </div>
@@ -1813,7 +2448,7 @@ export default function Training() {
                     </p>
                     <div className="mt-2 space-y-2 text-sm text-white">
                       <p>
-                        Brazo actual: <span className="font-semibold">{ARM_LABELS[repPlan?.currentArm || curlStartArm]}</span>
+                        Secuencia actual: <span className="font-semibold">{repPlan?.currentArm === 'left' ? 'primer brazo' : 'segundo brazo'}</span>
                       </p>
                       <p>
                         En este brazo: <span className="font-semibold">{repPlan?.armRepCount ?? 0}/{curlRepsPerArm}</span>
@@ -1834,7 +2469,7 @@ export default function Training() {
                       <p className="text-xs font-mono uppercase tracking-[0.18em] text-gym-cyan">
                         {plankStarted
                           ? 'Plank en curso'
-                          : `Haz la señal OK para iniciar o palma abierta para pausar (${Math.round(gestureConfidence * 100)}%)`}
+                          : `Haz la señal OK para iniciar (${Math.round(gestureConfidence * 100)}%)`}
                       </p>
                       <p className="font-display text-4xl font-bold leading-none text-gym-cyan">
                         {String(Math.floor(plankSeconds / 60)).padStart(2, '0')}:{String(plankSeconds % 60).padStart(2, '0')}
@@ -1843,7 +2478,7 @@ export default function Training() {
                         Mantén una línea recta desde hombros hasta talones. Usa la cámara para vigilar estabilidad de torso.
                       </p>
                       <p className="text-[10px] font-mono uppercase tracking-[0.16em] text-gym-muted">
-                        Palma abierta: pausar o reanudar · OK: iniciar plank
+                        OK: iniciar plank · Pausa manual: botón
                       </p>
                     </div>
                   </div>
@@ -1882,7 +2517,14 @@ export default function Training() {
                       }`}
                     />
                     <p className="text-sm leading-6 text-white">
-                      {notice?.message || handError || squatValidation?.feedback || insights.feedback || 'Esperando datos de la cámara.'}
+                      {formatPoseFeedbackMessage({
+                        message: notice?.message || handError || squatValidation?.feedback || insights.feedback || 'Esperando datos de la cámara.',
+                        requiresPose,
+                        isValid: Boolean(squatValidation?.isValid),
+                        trackingMode,
+                        exerciseName: activeExercise.name,
+                        exerciseCountMode,
+                      })}
                     </p>
                   </div>
                 </div>

@@ -32,7 +32,7 @@ export async function getRoutineProgress(token, dayId) {
 }
 
 export async function getRoutinesProgress(token) {
-  const { data } = await axios.get(`${BASE_URL}/training/routines/progress`, {
+  const { data } = await api.get('/training/routines/progress', {
     headers: { Authorization: `Bearer ${token}` },
   })
   return data

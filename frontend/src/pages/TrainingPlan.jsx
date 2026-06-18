@@ -303,19 +303,10 @@ export default function TrainingPlan() {
           message: `Se guardó la variante ${selectedVariant} del plan ${activePlan.plan_type}. Ahora aparece en Entrenar.`,
         })
 
-        localStorage.setItem(
-          'gympose_training_plan',
-          JSON.stringify({
-            ...activePlan,
-            variant: selectedVariant,
-            frequency,
-          }),
-        )
-
-        if (data?.plan?.plan) {
+        if (data?.plan?.plan || data?.plan?.days) {
           setVariants((current) => ({
             ...(current || {}),
-            [selectedVariant]: data.plan.plan,
+            [selectedVariant]: data.plan.plan || data.plan,
           }))
         }
         setTimeout(() => {
