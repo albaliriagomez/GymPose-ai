@@ -1,31 +1,6 @@
-import axios from 'axios'
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
-
-const api = axios.create({
-  baseURL: API_URL,
-  headers: { 'Content-Type': 'application/json' },
-})
+import api from './apiClient'
 
 const normalizeUser = (user) => user ? { ...user, role: user.role || 'user' } : user
-
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('gympose_token')
-  if (token) config.headers.Authorization = `Bearer ${token}`
-  return config
-})
-
-api.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    if (error.response?.status === 401) {
-      localStorage.removeItem('gympose_token')
-      localStorage.removeItem('gympose_user')
-      window.location.href = '/login'
-    }
-    return Promise.reject(error)
-  }
-)
 
 export const register = async (userData) => {
   try {
@@ -96,7 +71,14 @@ export const logout = () => {
 
 export const getUser = () => {
   const user = localStorage.getItem('gympose_user')
-  return user ? normalizeUser(JSON.parse(user)) : null
+  if (!user) return null
+
+  try {
+    return normalizeUser(JSON.parse(user))
+  } catch {
+    logout()
+    return null
+  }
 }
 
 export const getToken = () => {

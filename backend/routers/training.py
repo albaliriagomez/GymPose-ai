@@ -6,6 +6,7 @@ Endpoints del módulo de Plan de Entrenamiento.
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session as DBSession
 from typing import Optional
+from uuid import UUID
 
 from database import get_db
 from models import User
@@ -25,6 +26,7 @@ from schemas.training import (
     TrainingPlan,
     TrainingPlanSelectRequest,
     TrainingExerciseRepRequest,
+    TrainingExerciseEventRequest,
     TrainingRoutineCompleteRequest,
     TrainingRoutineDayProgressItem,
     TrainingRoutineProgressResponse,
@@ -164,49 +166,72 @@ def get_routines_progress(
     return TrainingRoutineProgressResponse(**payload)
 
 
-@router.post("/routines/{day_id}/start", response_model=TrainingRoutineDayProgressItem)
+@router.post("/routines/{day_number}/start", response_model=TrainingRoutineDayProgressItem)
 def start_routine(
-    day_id: int,
+    day_number: int,
+    client_event_id: Optional[UUID] = None,
     current_user: User = Depends(get_current_user),
     db: DBSession = Depends(get_db),
 ):
-    start_routine_day(db=db, user=current_user, day_number=day_id)
-    return TrainingRoutineDayProgressItem(**build_day_progress_response(db, current_user, day_id))
+    start_routine_day(db=db, user=current_user, day_number=day_number, client_event_id=client_event_id)
+    return TrainingRoutineDayProgressItem(**build_day_progress_response(db, current_user, day_number))
 
 
-@router.get("/routines/{day_id}/progress", response_model=TrainingRoutineDayProgressItem)
+@router.get("/routines/{day_number}/progress", response_model=TrainingRoutineDayProgressItem)
 def get_day_progress(
-    day_id: int,
+    day_number: int,
     current_user: User = Depends(get_current_user),
     db: DBSession = Depends(get_db),
 ):
-    return TrainingRoutineDayProgressItem(**build_day_progress_response(db, current_user, day_id))
+    return TrainingRoutineDayProgressItem(**build_day_progress_response(db, current_user, day_number))
 
 
-@router.post("/routines/{day_id}/exercise/reps", response_model=TrainingRoutineDayProgressItem)
+@router.post("/routines/{day_number}/exercise/reps", response_model=TrainingRoutineDayProgressItem)
 def add_reps(
-    day_id: int,
+    day_number: int,
     body: TrainingExerciseRepRequest,
     current_user: User = Depends(get_current_user),
     db: DBSession = Depends(get_db),
 ):
-    add_reps_to_current_exercise(db=db, user=current_user, day_number=day_id, reps_count=body.reps_count)
-    return TrainingRoutineDayProgressItem(**build_day_progress_response(db, current_user, day_id))
+    add_reps_to_current_exercise(
+        db=db,
+        user=current_user,
+        day_number=day_number,
+        reps_count=body.reps_count,
+        client_event_id=body.client_event_id,
+    )
+    return TrainingRoutineDayProgressItem(**build_day_progress_response(db, current_user, day_number))
 
 
-@router.post("/routines/{day_id}/exercise/set-complete", response_model=TrainingRoutineDayProgressItem)
+@router.post("/routines/{day_number}/exercise/set-complete", response_model=TrainingRoutineDayProgressItem)
 def complete_set(
-    day_id: int,
+    day_number: int,
+    body: TrainingExerciseEventRequest,
     current_user: User = Depends(get_current_user),
     db: DBSession = Depends(get_db),
 ):
-    complete_current_set(db=db, user=current_user, day_number=day_id)
-    return TrainingRoutineDayProgressItem(**build_day_progress_response(db, current_user, day_id))
+    complete_current_set(
+        db=db,
+        user=current_user,
+        day_number=day_number,
+        exercise_id=body.exercise_id,
+        exercise_name=body.exercise_name,
+        exercise_mode=body.exercise_mode,
+        tracking_mode=body.tracking_mode,
+        current_set=body.current_set,
+        sets_target=body.sets_target,
+        reps_completed_current_set=body.reps_completed_current_set,
+        reps_target_value=body.reps_target_value,
+        duration_seconds=body.duration_seconds,
+        seconds_elapsed=body.seconds_elapsed,
+        client_event_id=body.client_event_id,
+    )
+    return TrainingRoutineDayProgressItem(**build_day_progress_response(db, current_user, day_number))
 
 
-@router.post("/routines/{day_id}/complete", response_model=TrainingRoutineDayProgressItem)
+@router.post("/routines/{day_number}/complete", response_model=TrainingRoutineDayProgressItem)
 def complete_routine(
-    day_id: int,
+    day_number: int,
     body: TrainingRoutineCompleteRequest,
     current_user: User = Depends(get_current_user),
     db: DBSession = Depends(get_db),
@@ -214,9 +239,10 @@ def complete_routine(
     complete_routine_day(
         db=db,
         user=current_user,
-        day_number=day_id,
+        day_number=day_number,
         completed_exercises_count=body.completed_exercises_count,
         total_exercises=body.total_exercises,
+        client_event_id=body.client_event_id,
         force=body.force,
     )
-    return TrainingRoutineDayProgressItem(**build_day_progress_response(db, current_user, day_id))
+    return TrainingRoutineDayProgressItem(**build_day_progress_response(db, current_user, day_number))

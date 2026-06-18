@@ -97,3 +97,56 @@ export function detectOkGesture(handResult) {
     confidence,
   }
 }
+
+export function detectOpenPalmGesture(handResult) {
+  const landmarks = handResult?.landmarks?.[0]
+  if (!landmarks?.length) {
+    return { detected: false, confidence: 0 }
+  }
+
+  const wrist = landmarks[0]
+  const thumbTip = landmarks[4]
+  const indexTip = landmarks[8]
+  const middleTip = landmarks[12]
+  const ringTip = landmarks[16]
+  const pinkyTip = landmarks[20]
+  const thumbMcp = landmarks[2]
+  const indexMcp = landmarks[5]
+  const middleMcp = landmarks[9]
+  const ringMcp = landmarks[13]
+  const pinkyMcp = landmarks[17]
+
+  const palmScale =
+    distance(wrist, middleMcp) ||
+    distance(wrist, indexMcp) ||
+    distance(wrist, ringMcp) ||
+    distance(wrist, pinkyMcp) ||
+    0.1
+
+  const indexExtended = isFingerExtended(landmarks, 8, 6)
+  const middleExtended = isFingerExtended(landmarks, 12, 10)
+  const ringExtended = isFingerExtended(landmarks, 16, 14)
+  const pinkyExtended = isFingerExtended(landmarks, 20, 18)
+  const thumbExtended = distance(wrist, thumbTip) > palmScale * 0.72 && distance(thumbTip, thumbMcp) > palmScale * 0.3
+  const fingersExtendedCount = [indexExtended, middleExtended, ringExtended, pinkyExtended, thumbExtended].filter(Boolean).length
+  const handOpenDistance =
+    [indexTip, middleTip, ringTip, pinkyTip]
+      .map((tip) => distance(wrist, tip))
+      .filter((value) => Number.isFinite(value))
+      .reduce((sum, value) => sum + value, 0) / 4
+
+  const fingersOpen = fingersExtendedCount >= 4
+  const palmOpen = fingersOpen && handOpenDistance >= palmScale * 1.15
+
+  const confidence =
+    [
+      fingersOpen,
+      palmOpen,
+      thumbExtended,
+    ].filter(Boolean).length / 3
+
+  return {
+    detected: palmOpen,
+    confidence,
+  }
+}

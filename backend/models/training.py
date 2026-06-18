@@ -1,3 +1,4 @@
+import uuid
 from datetime import datetime
 
 from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, JSON, String, UniqueConstraint
@@ -94,3 +95,49 @@ class TrainingExerciseProgress(Base):
     plan = relationship("TrainingPlanSelection", backref="exercise_progress")
     routine = relationship("TrainingRoutineProgress", backref="exercise_progress")
     user = relationship("User", backref="training_exercise_progress")
+
+
+class TrainingExerciseEvent(Base):
+    __tablename__ = "training_exercise_events"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "day_number",
+            "event_type",
+            "client_event_id",
+            name="uq_training_exercise_event_client_id",
+        ),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    training_plan_id = Column(
+        Integer,
+        ForeignKey("training_plan_selections.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    training_routine_id = Column(
+        Integer,
+        ForeignKey("training_routine_progress.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    training_exercise_id = Column(
+        Integer,
+        ForeignKey("training_exercise_progress.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+    day_number = Column(Integer, nullable=False, index=True)
+    event_type = Column(String, nullable=False, index=True)
+    client_event_id = Column(UUID(as_uuid=True), nullable=True, index=True)
+    reps_delta = Column(Integer, nullable=True)
+    sets_delta = Column(Integer, nullable=True)
+    payload = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    plan = relationship("TrainingPlanSelection", backref="exercise_events")
+    routine = relationship("TrainingRoutineProgress", backref="exercise_events")
+    exercise = relationship("TrainingExerciseProgress", backref="events")
+    user = relationship("User", backref="training_exercise_events")

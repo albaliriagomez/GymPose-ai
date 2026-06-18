@@ -1,3 +1,5 @@
+import exerciseImageFiles from './exerciseImageManifest.json'
+
 const RAW_EXERCISES = [
   'Abducción de Cadera en Polea',
   'Aperturas con Mancuernas',
@@ -37,8 +39,10 @@ const RAW_EXERCISES = [
   'Extensión Tríceps en Polea',
   'Face Pulls',
   'Flexiones con Lastre',
+  'Flexiones Diamante',
   'Flexiones de Pecho',
   'Flexiones en Pared o Rodillas',
+  'Flexiones Rusas de Antebrazos',
   'Fondos en Paralelas',
   'Hip Thrust con Barra',
   'Hip Thrust con Mancuerna',
@@ -77,6 +81,7 @@ const RAW_EXERCISES = [
   'Press Militar con Barra',
   'Pull-Over con Mancuerna',
   'Remo con Banda o Mancuerna',
+  'Remo con Mancuerna Apoyado en Banco',
   'Remo con Barra',
   'Remo con Barra T',
   'Remo con Mancuerna',
@@ -95,7 +100,9 @@ const RAW_EXERCISES = [
   'Sprint en Cinta o Intervalo',
   'Superman',
   'Zancadas Alternadas con Salto',
+  'Zancadas Alternas por Tiempo',
   'Zancadas con Mancuernas',
+  'Saltos con Zancada Alterna',
 ]
 
 const CATEGORY_RULES = [
@@ -132,10 +139,78 @@ const CATEGORY_RULES = [
 ]
 
 function normalizeText(value) {
-  return value
+  return String(value || '')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
+}
+
+function normalizeExerciseName(value) {
+  return normalizeText(value).replace(/\s+/g, ' ').trim()
+}
+
+const EXERCISE_IMAGE_FOLDER = '/GymImagenes'
+
+function stripAccents(value) {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+}
+
+function removeParentheticalContent(value) {
+  return value.replace(/\s*\((.*?)\)\s*/g, ' ')
+}
+
+function normalizeImageStem(value) {
+  return value
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+const EXERCISE_IMAGE_OVERRIDES = {
+  [normalizeText('Plank')]: 'Plancha abdominal.jpg',
+  [normalizeText('Curl de Bíceps con Mancuernas')]: 'Curl de Bíceps con Mancuernas.png',
+  [normalizeText('Remo con Banda o Mancuerna')]: 'Remo con mancuerna.jpg',
+  [normalizeText('Marcha en Sitio Rodillas Altas')]: 'Marcha en Sitio Rodillas Altas.jpg',
+  [normalizeText('Plank en Rodillas')]: 'Plancha en rodillas.jpg',
+}
+
+const IMAGE_INDEX = Array.isArray(exerciseImageFiles)
+  ? exerciseImageFiles.map((fileName) => {
+      const lastDotIndex = fileName.lastIndexOf('.')
+      const stem = lastDotIndex > 0 ? fileName.slice(0, lastDotIndex) : fileName
+      return {
+        fileName,
+        normalized: normalizeImageStem(stripAccents(removeParentheticalContent(stem))).toLowerCase(),
+      }
+    })
+  : []
+
+function getImageMatchScore(exerciseNormalized, fileNormalized) {
+  if (!fileNormalized) return 0
+  if (exerciseNormalized === fileNormalized) return 4
+  if (exerciseNormalized.includes(fileNormalized)) return 3
+  if (fileNormalized.includes(exerciseNormalized)) return 2
+  return 0
+}
+
+function resolveExerciseImagePath(name) {
+  const normalizedName = normalizeImageStem(stripAccents(removeParentheticalContent(name))).toLowerCase()
+  const overrideFileName = EXERCISE_IMAGE_OVERRIDES[normalizeText(name)]
+  if (overrideFileName) {
+    return encodeURI(`${EXERCISE_IMAGE_FOLDER}/${overrideFileName}`)
+  }
+
+  const bestMatch = IMAGE_INDEX
+    .map((entry) => ({
+      ...entry,
+      score: getImageMatchScore(normalizedName, entry.normalized),
+    }))
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score || b.normalized.length - a.normalized.length)[0]
+
+  return bestMatch ? encodeURI(`${EXERCISE_IMAGE_FOLDER}/${bestMatch.fileName}`) : null
 }
 
 function inferCategory(name) {
@@ -154,8 +229,12 @@ function inferTrackingMode(name) {
     return 'curl'
   }
 
+  if (/rusa|antebrazo/.test(normalized)) {
+    return 'russian'
+  }
+
   if (
-    /press|flexion|fondos|aperturas|cruce de poleas|patada de triceps|extension de triceps|elevaciones frontales|elevaciones laterales|press arnold|press frances/.test(
+    /press militar|press de hombros|press de banca|press inclinado|press declinado|press arnold|press frances|flexion|fondos|remo/.test(
       normalized,
     )
   ) {
@@ -163,7 +242,7 @@ function inferTrackingMode(name) {
   }
 
   if (
-    /sentadilla|zancadas|estocadas|peso muerto|hip thrust|prensa|gemelos|talones|cuadriceps|abduccion/.test(
+    /sentadilla|zancadas|estocadas/.test(
       normalized,
     )
   ) {
@@ -171,6 +250,39 @@ function inferTrackingMode(name) {
   }
 
   return 'manual'
+}
+
+function inferCountMode(name, category, trackingMode) {
+  const normalized = normalizeText(name)
+
+  if (
+    /plank|plancha|wall sit|caminata|caminar|bici|bicicleta|caminadora|cardio|sprint|trote|marcha en sitio|estiramientos|movilidad|rotaci[oó]n|saltos en caja|burpees|mountain climbers|superman hold|hold/.test(
+      normalized,
+    ) ||
+    category === 'Cardio / Movilidad' ||
+    normalized.includes('plank')
+  ) {
+    return 'timer'
+  }
+
+  if (trackingMode === 'manual') {
+    return 'manual'
+  }
+
+  return 'reps'
+}
+
+function inferDefaultDurationSeconds(name, countMode) {
+  if (countMode !== 'timer') {
+  return 0
+}
+
+  const normalized = normalizeText(name)
+  if (/plank|plancha/.test(normalized)) {
+    return 45
+  }
+
+  return 60
 }
 
 function buildDescription(category, trackingMode) {
@@ -184,14 +296,27 @@ function buildDescription(category, trackingMode) {
 export const TRAINING_EXERCISES = RAW_EXERCISES.map((name) => {
   const category = inferCategory(name)
   const trackingMode = inferTrackingMode(name)
+  const countMode = inferCountMode(name, category, trackingMode)
+  const imageUrl = resolveExerciseImagePath(name)
 
   return {
     name,
     category,
+    mode: countMode,
     trackingMode,
+    countMode,
+    requiresPose: countMode === 'reps' && trackingMode !== 'manual',
+    defaultDurationSeconds: inferDefaultDurationSeconds(name, countMode),
     description: buildDescription(category, trackingMode),
+    imageUrl,
     liveLabel:
-      trackingMode === 'manual' ? 'Modo guía' : trackingMode === 'core' ? 'Core' : 'Live',
+      countMode === 'timer'
+        ? 'Timer'
+        : trackingMode === 'manual'
+          ? 'Modo guía'
+          : trackingMode === 'core'
+            ? 'Core'
+            : 'Live',
   }
 })
 
@@ -199,6 +324,23 @@ export const TRAINING_EXERCISES_BY_NAME = TRAINING_EXERCISES.reduce((acc, item) 
   acc[item.name] = item
   return acc
 }, {})
+
+export const TRAINING_EXERCISES_BY_NORMALIZED_NAME = TRAINING_EXERCISES.reduce((acc, item) => {
+  acc[normalizeExerciseName(item.name)] = item
+  return acc
+}, {})
+
+export function resolveTrainingExercise(name) {
+  const normalizedName = normalizeExerciseName(name)
+  if (!normalizedName) return null
+
+  return (
+    TRAINING_EXERCISES_BY_NAME[name] ||
+    TRAINING_EXERCISES_BY_NORMALIZED_NAME[normalizedName] ||
+    TRAINING_EXERCISES.find((item) => normalizeExerciseName(item.name) === normalizedName) ||
+    null
+  )
+}
 
 export const TRAINING_EXERCISE_GROUPS = Object.entries(
   TRAINING_EXERCISES.reduce((acc, item) => {

@@ -55,7 +55,26 @@ class PostureAnalyzer:
     """Servicio para análisis de postura usando MediaPipe Pose"""
 
     def __init__(self):
-        self.mp_pose = mp.solutions.pose
+        self.mp_pose = None
+        self.pose = None
+
+        # Algunas versiones/instalaciones de mediapipe no exponen mp.solutions
+        # en el nivel superior. Probamos rutas compatibles antes de rendirnos.
+        pose_module = None
+        for candidate in (
+            lambda: mp.solutions.pose,
+            lambda: __import__("mediapipe.python.solutions.pose", fromlist=["pose"]).pose,
+        ):
+            try:
+                pose_module = candidate()
+                break
+            except Exception:
+                continue
+
+        if pose_module is None:
+            return
+
+        self.mp_pose = pose_module
         self.pose = self.mp_pose.Pose(
             static_image_mode=True,
             model_complexity=2,
@@ -198,6 +217,22 @@ class PostureAnalyzer:
 
     def analyze_image(self, image_bytes: bytes) -> PostureAnalysisResponse:
         start_time = time.time()
+
+        if self.pose is None:
+            return PostureAnalysisResponse(
+                success=False,
+                angles=[],
+                landmarks=[],
+                lines=[],
+                recommendations=[
+                    "No se pudo inicializar MediaPipe Pose en este entorno.",
+                    "Reinstala mediapipe o verifica que la versión instalada sea compatible con tu proyecto."
+                ],
+                precision=0.0,
+                latency_ms=int((time.time() - start_time) * 1000),
+                exercise_type=None,
+                validation_message="MediaPipe Pose no disponible"
+            )
 
         # Decodificar imagen
         nparr = np.frombuffer(image_bytes, np.uint8)

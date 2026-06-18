@@ -1,13 +1,11 @@
-import axios from 'axios'
-
-const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+import api from './apiClient'
 const headers  = () => ({ Authorization: `Bearer ${localStorage.getItem('gympose_token')}` })
 
 // Crear sesión y guardar repetición
 export const saveTrainingSession = async ({ exercise, score, duration_seconds = 0 }) => {
   try {
-    const { data } = await axios.post(
-      `${BASE_URL}/sessions/save`,
+    const { data } = await api.post(
+      '/sessions/save',
       { exercise, score, duration_seconds },
       { headers: headers() }
     )

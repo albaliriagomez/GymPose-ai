@@ -3,6 +3,47 @@ import { useNavigate } from 'react-router-dom'
 import DashboardLayout from '../components/DashboardLayout'
 import { getRoutinesProgress, startRoutineDay, completeRoutineDay, completeRoutineSet, recordRoutineReps } from '../services/trainingService'
 
+function normalizeSavedPlan(payload) {
+  if (!payload) return null
+
+  const plan =
+    payload.planSnapshot ||
+    payload.selectedPlanSnapshot ||
+    payload.training_plan_snapshot ||
+    payload.plan_snapshot ||
+    payload.plan?.plan ||
+    payload.plan ||
+    payload
+  const days = Array.isArray(plan.days) ? plan.days : Array.isArray(payload.days) ? payload.days : []
+  if (!days.length) return null
+
+  return {
+    ...plan,
+    days,
+    variant: plan.variant || plan.selectedVariant || payload.selectedVariant || payload.variant || null,
+    selectedVariant: plan.selectedVariant || payload.selectedVariant || plan.variant || payload.variant || null,
+    frequency: plan.frequency || payload.frequency || null,
+    frequency_level: plan.frequency_level || payload.frequency_level || payload.frequency || null,
+    current_day: payload.current_day || payload.currentDay || plan.current_day || plan.currentDay || days[0] || null,
+  }
+}
+
+function buildFallbackRoutinesFromPlan(plan) {
+  if (!plan?.days?.length) return null
+
+  const routines = plan.days.map((day) => ({
+    ...day,
+    status: day.status || 'pending',
+    completed_exercises_count: Number(day.completed_exercises_count || 0),
+    total_exercises: Number(day.total_exercises || day.exercises?.length || 0),
+  }))
+
+  return {
+    routines,
+    current_day: plan.current_day || routines[0] || null,
+  }
+}
+
 // ─── Badge de estado ─────────────────────────────────────────────────────────
 function StatusBadge({ status }) {
   const statusMap = {
@@ -240,29 +281,40 @@ export default function TrainingProgress() {
   const [actionLoading, setActionLoading] = useState(false)
   const [loadingExercise, setLoadingExercise] = useState(null)
 
-  // Cargar rutinas al montar
+  // Cargar rutinas desde backend
   useEffect(() => {
     if (!token) {
       navigate('/login')
       return
     }
 
+    let cancelled = false
+
     const loadRoutines = async () => {
       setLoading(true)
       setError(null)
       try {
         const data = await getRoutinesProgress(token)
+        if (cancelled) return
+
         setRoutines(data)
       } catch (err) {
+        if (cancelled) return
         const msg = err.response?.data?.detail || err.message || 'Error al cargar rutinas'
         setError(msg)
       } finally {
-        setLoading(false)
+        if (!cancelled) {
+          setLoading(false)
+        }
       }
     }
 
     loadRoutines()
-  }, [token, navigate])
+
+    return () => {
+      cancelled = true
+    }
+  }, [navigate, token])
 
   const handleStartDay = async (dayNumber) => {
     setActionLoading(true)

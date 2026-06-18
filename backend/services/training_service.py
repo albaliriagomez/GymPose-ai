@@ -1,263 +1,293 @@
-"""
-training_service.py — GymPose
+﻿"""
+training_service.py â€” GymPose
 Genera 3 variantes de plan (A / B / C) por meta y frecuencia.
-Integra Groq para recomendar la variante más adecuada al perfil del usuario.
+Integra Groq para recomendar la variante mÃ¡s adecuada al perfil del usuario.
 
-Reps de referencia (estándar deportivo):
-  Fuerza          → 1-5 reps
-  Hipertrofia     → 6-12 reps  (nunca 15+ en ejercicios principales)
-  Resistencia     → 15-20 reps
-  Circuito metab. → 12-15 reps o tiempo (20-40 seg)
+Reps de referencia (estÃ¡ndar deportivo):
+  Fuerza          â†’ 1-5 reps
+  Hipertrofia     â†’ 6-12 reps  (nunca 15+ en ejercicios principales)
+  Resistencia     â†’ 15-20 reps
+  Circuito metab. â†’ 12-15 reps o tiempo (20-40 seg)
 
 Ejercicios detectables por MediaPipe en Training.jsx:
-  ✓ Sentadilla con Barra / Sentadilla al Cajón / Sentadilla con Salto
-  ✓ Flexiones de Pecho / Flexiones en Pared o Rodillas
-  ✓ Curl de Bíceps con Barra / Curl Martillo
+  âœ“ Sentadilla con Barra / Sentadilla al CajÃ³n / Sentadilla con Salto
+  âœ“ Flexiones de Pecho / Flexiones en Pared o Rodillas
+  âœ“ Curl de BÃ­ceps con Barra / Curl Martillo
 """
 
 import os, json, re
 from datetime import datetime
 from typing import Optional
+from uuid import UUID
 from groq import Groq
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from schemas.training import TrainingPlan, WorkoutDay, Exercise
-from models import User, TrainingPlanSelection, TrainingRoutineProgress, TrainingExerciseProgress
+from models import User, TrainingPlanSelection, TrainingRoutineProgress, TrainingExerciseProgress, TrainingExerciseEvent
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  CONSTANTE: qué ejercicios detecta MediaPipe hoy
-# ─────────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+#  CONSTANTE: quÃ© ejercicios detecta MediaPipe hoy
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 DETECTABLE_EXERCISES = {
-    "Sentadilla con Barra",
-    "Sentadilla al Cajón",
+    "Sentadilla al CajÃ³n",
     "Sentadilla con Salto",
     "Flexiones de Pecho",
+    "Flexiones Diamante",
+    "Flexiones Cerradas",
     "Flexiones en Pared o Rodillas",
-    "Curl de Bíceps con Barra",
     "Curl Martillo",
+    "Curl de BÃ­ceps con Mancuernas",
+    "Mountain Climbers",
+    "Marcha en Sitio Rodillas Altas",
+    "Polichinelas",
+    "Burpees",
+    "Flexiones Rusas de Antebrazos",
+    "Saltos con Zancada Alterna",
+    "Estocadas EstÃ¡ticas",
+}
+
+APPROVED_TRAINING_EXERCISES = {
+    "Sentadilla al CajÃ³n",
+    "Zancadas Alternas por Tiempo",
+    "Estocadas EstÃ¡ticas",
+    "Flexiones en Pared o Rodillas",
+    "Flexiones de Pecho",
+    "Flexiones Diamante",
+    "Remo Sentado con Banda",
+    "Remo con Mancuerna Apoyado en Banco",
+    "Remo con Banda o Mancuerna",
+    "Flexiones Rusas de Antebrazos",
+    "Curl de BÃ­ceps con Barra",
+    "Curl de BÃ­ceps con Mancuernas",
+    "Curl de BÃ­ceps en Polea",
+    "Curl de BÃ­ceps Predicador",
+    "Curl Martillo",
+    "Curl Martillo con Cable",
+    "Polichinelas",
+    "Burpees",
+    "Marcha en Sitio Rodillas Altas",
+    "Mountain Climbers",
+    "Saltos con Zancada Alterna",
+    "Hip Thrust con Barra",
+    "Hip Thrust con Mancuerna",
+    "Hip Thrust con Peso Corporal",
+    "Hip Thrust en Suelo",
+    "Elevaciones de Talones Sentado",
+    "Plank",
+    "Plancha Lateral",
+    "Plank con RotaciÃ³n",
+    "Plank en Rodillas",
 }
 
 def _mark_detectable(ex: Exercise) -> Exercise:
-    """Añade nota si el ejercicio es detectable en vivo por MediaPipe."""
+    """AÃ±ade nota si el ejercicio es detectable en vivo por MediaPipe."""
     if ex.name in DETECTABLE_EXERCISES:
-        tag = "⚡ Detectable en tiempo real con tu cámara"
-        notes = f"{ex.notes} · {tag}" if ex.notes else tag
+        tag = "âš¡ Detectable en tiempo real con tu cÃ¡mara"
+        notes = f"{ex.notes} Â· {tag}" if ex.notes else tag
         return Exercise(
             name=ex.name, sets=ex.sets, reps=ex.reps,
             rest_seconds=ex.rest_seconds, muscle_group=ex.muscle_group,
+            mode=_infer_exercise_mode(ex),
             notes=notes,
         )
-    return ex
+    return Exercise(
+        name=ex.name,
+        sets=ex.sets,
+        reps=ex.reps,
+        rest_seconds=ex.rest_seconds,
+        muscle_group=ex.muscle_group,
+        mode=_infer_exercise_mode(ex),
+        notes=ex.notes,
+    )
 
 def _mark_list(exercises: list[Exercise]) -> list[Exercise]:
     return [_mark_detectable(e) for e in exercises]
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+def _infer_exercise_mode(ex: Exercise) -> str:
+    explicit_mode = getattr(ex, "mode", None)
+    if explicit_mode in {"reps", "timer", "hold"}:
+        return explicit_mode
+
+    text = " ".join(
+        part for part in [ex.name, ex.muscle_group, ex.reps, ex.notes or ""] if part
+    ).lower()
+    if any(token in text for token in ("seg", "min", "plank", "plancha", "sprint", "cardio", "marcha", "caminata", "bici", "movilidad", "hiit")):
+        return "timer"
+    if "hold" in text or "isometric" in text or "isometr" in text:
+        return "hold"
+    return "reps"
+
+
+def _prepare_exercise_pool(exercises: list[Exercise], imc_category: Optional[str]) -> list[Exercise]:
+    adapted = _adapt_list(exercises, imc_category)
+    approved_only = [exercise for exercise in adapted if exercise.name in APPROVED_TRAINING_EXERCISES]
+    return _mark_list(approved_only)
+
+
+def _filter_exercises(exercises: list[Exercise], keywords: list[str]) -> list[Exercise]:
+    normalized_keywords = [keyword.lower() for keyword in keywords]
+    filtered: list[Exercise] = []
+    for exercise in exercises:
+        haystack = " ".join(
+            part for part in [exercise.name, exercise.muscle_group, exercise.reps, exercise.notes or ""] if part
+        ).lower()
+        if any(keyword in haystack for keyword in normalized_keywords):
+            filtered.append(exercise)
+    return filtered
+
+
+def _unique_exercises(exercises: list[Exercise]) -> list[Exercise]:
+    seen: set[str] = set()
+    unique: list[Exercise] = []
+    for exercise in exercises:
+        key = exercise.name.strip().lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(exercise)
+    return unique
+
+
+def _build_workout_day(
+    day_number: int,
+    day_name: str,
+    focus: str,
+    exercises: list[Exercise],
+) -> WorkoutDay:
+    return WorkoutDay(
+        day_number=day_number,
+        day_name=day_name,
+        focus=focus,
+        exercises=_unique_exercises(exercises),
+    )
+
+
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 #  BIBLIOTECA DE EJERCICIOS
 #  Reps revisadas: hipertrofia = 6-12, circuito = 12-15 o tiempo
-# ─────────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-# ── HIPERTROFIA ──────────────────────────────────────────────────────────────
+# â”€â”€ HIPERTROFIA â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 HYPERTROPHY_PUSH_A = [
-    Exercise(name="Press de Banca con Barra",       sets=4, reps="6-8",   rest_seconds=120, muscle_group="Pecho",             notes="Escápulas retraídas. Peso máximo controlable."),
-    Exercise(name="Press Inclinado con Mancuernas", sets=4, reps="8-10",  rest_seconds=90,  muscle_group="Pecho Superior",    notes="Ángulo 30-45°"),
-    Exercise(name="Press Militar con Barra",        sets=4, reps="6-8",   rest_seconds=120, muscle_group="Hombros",           notes="Core apretado, no arquees la espalda"),
-    Exercise(name="Elevaciones Laterales",          sets=3, reps="10-12", rest_seconds=60,  muscle_group="Deltoides Lateral", notes="Codos ligeramente flexionados"),
-    Exercise(name="Fondos en Paralelas",            sets=3, reps="8-10",  rest_seconds=90,  muscle_group="Tríceps/Pecho",     notes="Inclínate al frente para activar pecho"),
-    Exercise(name="Extensión de Tríceps en Polea",  sets=3, reps="10-12", rest_seconds=60,  muscle_group="Tríceps",           notes="Codos pegados al cuerpo"),
 ]
 
 HYPERTROPHY_PUSH_B = [
-    Exercise(name="Flexiones de Pecho",             sets=5, reps="6-10",  rest_seconds=90,  muscle_group="Pecho/Tríceps",     notes="Agrega peso en chaleco si es fácil. ⚡ Detectable en tiempo real con tu cámara"),
-    Exercise(name="Press de Hombros con Mancuernas",sets=4, reps="8-10",  rest_seconds=90,  muscle_group="Hombros",           notes="Movimiento controlado en la bajada"),
-    Exercise(name="Press Declinado con Barra",      sets=4, reps="8-10",  rest_seconds=90,  muscle_group="Pecho Inferior",    notes="Pies asegurados en el banco"),
-    Exercise(name="Elevaciones Frontales",          sets=3, reps="10-12", rest_seconds=60,  muscle_group="Deltoides Anterior",notes="Alterna brazos para mayor control"),
-    Exercise(name="Patada de Tríceps",              sets=3, reps="10-12", rest_seconds=60,  muscle_group="Tríceps",           notes="Codo fijo, solo mueve el antebrazo"),
-    Exercise(name="Aperturas con Mancuernas",       sets=3, reps="10-12", rest_seconds=75,  muscle_group="Pecho",             notes="Leve flexión en codo, estiramiento controlado"),
+    Exercise(name="Flexiones de Pecho",             sets=5, reps="6-10",  rest_seconds=90,  muscle_group="Pecho/TrÃ­ceps",     notes="Agrega peso en chaleco si es fÃ¡cil. âš¡ Detectable en tiempo real con tu cÃ¡mara"),
+    Exercise(name="Flexiones Diamante",             sets=4, reps="8-12",  rest_seconds=75,  muscle_group="Pecho/TrÃ­ceps",     notes="Manos cerradas debajo del pecho, mayor Ã©nfasis en trÃ­ceps. âš¡ Detectable en tiempo real con tu cÃ¡mara"),
+    Exercise(name="Flexiones Rusas de Antebrazos",  sets=3, reps="8-10",  rest_seconds=75,  muscle_group="Pecho/TrÃ­ceps/Hombros", notes="Baja controlado apoyando antebrazos y vuelve a extender. Variante avanzada de empuje"),
 ]
 
 HYPERTROPHY_PUSH_C = [
-    Exercise(name="Press de Banca con Mancuernas",  sets=4, reps="8-10",  rest_seconds=90,  muscle_group="Pecho",             notes="Mayor rango de movimiento que con barra"),
-    Exercise(name="Press Arnold",                   sets=4, reps="8-10",  rest_seconds=90,  muscle_group="Hombros (360°)",    notes="Rotación completa del hombro"),
-    Exercise(name="Cruce de Poleas (Cable Fly)",    sets=3, reps="10-12", rest_seconds=60,  muscle_group="Pecho",             notes="Contrae el pecho al centro"),
-    Exercise(name="Fondos en Paralelas",            sets=3, reps="8-10",  rest_seconds=90,  muscle_group="Tríceps/Pecho",     notes="Peso corporal o añade lastre"),
-    Exercise(name="Press Francés (Skullcrusher)",   sets=3, reps="8-10",  rest_seconds=75,  muscle_group="Tríceps",           notes="Baja la barra hasta la frente con control"),
-    Exercise(name="Elevaciones Laterales en Polea", sets=3, reps="12",    rest_seconds=60,  muscle_group="Deltoides Lateral", notes="Tensión constante en toda la trayectoria"),
 ]
 
 HYPERTROPHY_PULL_A = [
-    Exercise(name="Dominadas o Jalón al Pecho",     sets=4, reps="6-8",   rest_seconds=120, muscle_group="Dorsal",            notes="Pecho al frente, retrae escápulas al bajar"),
-    Exercise(name="Remo con Barra",                 sets=4, reps="6-8",   rest_seconds=120, muscle_group="Espalda Media",     notes="Espalda neutra, tirón al ombligo"),
-    Exercise(name="Remo con Mancuerna",             sets=3, reps="8-10",  rest_seconds=75,  muscle_group="Dorsal",            notes="Apoya la rodilla libre en el banco"),
-    Exercise(name="Curl de Bíceps con Barra",       sets=4, reps="8-10",  rest_seconds=75,  muscle_group="Bíceps",            notes="Sin balanceo de torso. ⚡ Detectable en tiempo real con tu cámara"),
-    Exercise(name="Curl Martillo",                  sets=3, reps="10-12", rest_seconds=60,  muscle_group="Braquial",          notes="⚡ Detectable en tiempo real con tu cámara"),
-    Exercise(name="Face Pulls",                     sets=3, reps="12",    rest_seconds=60,  muscle_group="Deltoides Posterior",notes="Cuerda a nivel de ojos, codos altos"),
+    Exercise(name="Curl de Bíceps con Barra",       sets=4, reps="8-10",  rest_seconds=75,  muscle_group="Bíceps",            notes="Sin balanceo de torso"),
+    Exercise(name="Curl Martillo",                  sets=3, reps="10-12", rest_seconds=60,  muscle_group="Braquial",          notes="âš¡ Detectable en tiempo real con tu cÃ¡mara"),
 ]
 
 HYPERTROPHY_PULL_B = [
-    Exercise(name="Jalón al Pecho Agarre Cerrado",  sets=4, reps="8-10",  rest_seconds=90,  muscle_group="Dorsal",            notes="Agarre supino, codos hacia las caderas"),
-    Exercise(name="Remo en Polea Baja",             sets=4, reps="8-10",  rest_seconds=90,  muscle_group="Espalda Media",     notes="Tira hacia el abdomen, no levantes los codos"),
-    Exercise(name="Pull-Over con Mancuerna",        sets=3, reps="10-12", rest_seconds=75,  muscle_group="Dorsal/Serrato",    notes="Estiramiento completo sobre el banco"),
-    Exercise(name="Curl Concentrado",               sets=3, reps="10-12", rest_seconds=60,  muscle_group="Bíceps",            notes="Codo apoyado en muslo, contracción máxima"),
     Exercise(name="Curl de Bíceps en Polea",        sets=3, reps="10-12", rest_seconds=60,  muscle_group="Bíceps",            notes="Tensión constante todo el recorrido"),
-    Exercise(name="Remo Invertido en Barra",        sets=3, reps="8-10",  rest_seconds=75,  muscle_group="Espalda/Bíceps",    notes="Cuerpo recto como tabla"),
+    Exercise(name="Curl de Bíceps Predicador",      sets=3, reps="10-12", rest_seconds=75,  muscle_group="Bíceps",            notes="Codo apoyado, sin impulso"),
 ]
 
 HYPERTROPHY_PULL_C = [
-    Exercise(name="Dominadas Supinas",              sets=4, reps="6-8",   rest_seconds=120, muscle_group="Bíceps/Dorsal",     notes="Agarre supino activa más el bíceps"),
-    Exercise(name="Remo con Barra T",               sets=4, reps="8-10",  rest_seconds=90,  muscle_group="Espalda Media",     notes="Pecho apoyado en el pad"),
-    Exercise(name="Jalón al Pecho Agarre Ancho",    sets=3, reps="8-10",  rest_seconds=90,  muscle_group="Dorsal",            notes="Agarre 1.5x ancho de hombros"),
-    Exercise(name="Curl Martillo con Cable",        sets=3, reps="10-12", rest_seconds=60,  muscle_group="Braquial",          notes="Tensión constante en toda la trayectoria"),
-    Exercise(name="Curl Araña (Spider Curl)",       sets=3, reps="8-10",  rest_seconds=60,  muscle_group="Bíceps",            notes="Pecho apoyado en banco inclinado 45°"),
-    Exercise(name="Encogimientos de Hombros",       sets=4, reps="10-12", rest_seconds=60,  muscle_group="Trapecio",          notes="Sostén arriba 1 segundo"),
+    Exercise(name="Curl Martillo con Cable",        sets=3, reps="10-12", rest_seconds=60,  muscle_group="Braquial",          notes="TensiÃ³n constante en toda la trayectoria"),
 ]
 
 HYPERTROPHY_LEGS_A = [
-    Exercise(name="Sentadilla con Barra",           sets=4, reps="6-8",   rest_seconds=180, muscle_group="Cuádriceps/Glúteos",notes="Profundidad paralela. ⚡ Detectable en tiempo real con tu cámara"),
-    Exercise(name="Prensa de Piernas",              sets=4, reps="8-10",  rest_seconds=120, muscle_group="Cuádriceps",        notes="Pies a la anchura de caderas"),
-    Exercise(name="Peso Muerto Rumano",             sets=3, reps="8-10",  rest_seconds=120, muscle_group="Isquiotibiales",    notes="Espalda neutra, empuja caderas atrás"),
-    Exercise(name="Extensión de Cuádriceps",        sets=3, reps="10-12", rest_seconds=75,  muscle_group="Cuádriceps",        notes="Contracción máxima arriba, baja lento"),
-    Exercise(name="Curl Femoral Tumbado",           sets=3, reps="10-12", rest_seconds=75,  muscle_group="Isquiotibiales",    notes="Caderas pegadas al banco"),
-    Exercise(name="Elevaciones de Gemelos de Pie",  sets=5, reps="10-12", rest_seconds=60,  muscle_group="Gemelos",           notes="Pausa 2 seg arriba, baja completo"),
 ]
 
 HYPERTROPHY_LEGS_B = [
-    Exercise(name="Sentadilla Frontal",             sets=4, reps="6-8",   rest_seconds=150, muscle_group="Cuádriceps",        notes="Mayor activación de cuád que sentadilla trasera"),
-    Exercise(name="Peso Muerto Convencional",       sets=4, reps="6-8",   rest_seconds=180, muscle_group="Cadena Posterior",  notes="El ejercicio más completo para fuerza total"),
-    Exercise(name="Zancadas con Mancuernas",        sets=3, reps="8-10 c/lado", rest_seconds=90, muscle_group="Glúteos/Cuádriceps", notes="Rodilla trasera casi toca el suelo"),
-    Exercise(name="Hip Thrust con Barra",           sets=4, reps="8-10",  rest_seconds=90,  muscle_group="Glúteos",           notes="Empuje pélvico completo, aprieta arriba"),
-    Exercise(name="Curl Femoral de Pie",            sets=3, reps="10-12", rest_seconds=75,  muscle_group="Isquiotibiales",    notes="Control en la bajada"),
-    Exercise(name="Elevaciones de Gemelos Sentado", sets=4, reps="10-12", rest_seconds=60,  muscle_group="Sóleo",             notes="Ángulo diferente al de pie"),
+    Exercise(name="Hip Thrust con Barra",           sets=4, reps="8-10",  rest_seconds=90,  muscle_group="GlÃºteos",           notes="Empuje pÃ©lvico completo, aprieta arriba"),
 ]
 
 HYPERTROPHY_LEGS_C = [
-    Exercise(name="Sentadilla Búlgara",             sets=4, reps="8-10 c/lado", rest_seconds=120, muscle_group="Cuádriceps/Glúteos", notes="Pie trasero elevado, torso erguido"),
-    Exercise(name="Peso Muerto Sumo",               sets=4, reps="6-8",   rest_seconds=150, muscle_group="Glúteos/Abductores",notes="Pies girados 45°, agarre neutro"),
-    Exercise(name="Prensa 45° Pie Alto",            sets=4, reps="8-10",  rest_seconds=120, muscle_group="Glúteos/Isquios",   notes="Pies altos en la plataforma"),
-    Exercise(name="Curl Femoral Sentado",           sets=3, reps="10-12", rest_seconds=75,  muscle_group="Isquiotibiales",    notes="Rango completo de movimiento"),
-    Exercise(name="Abducción de Cadera en Polea",   sets=3, reps="12",    rest_seconds=60,  muscle_group="Abductores/Glúteos",notes="Control total, sin balanceo"),
-    Exercise(name="Calf Raise en Leg Press",        sets=4, reps="12",    rest_seconds=60,  muscle_group="Gemelos",           notes="Solo punta del pie en la plataforma"),
 ]
 
-# ── PÉRDIDA DE GRASA ─────────────────────────────────────────────────────────
+# â”€â”€ PÃ‰RDIDA DE GRASA â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 FAT_LOSS_CIRCUIT_A = [
-    Exercise(name="Sentadilla con Salto",           sets=4, reps="12",    rest_seconds=30,  muscle_group="Piernas/Cardio",    notes="⚡ Detectable en tiempo real con tu cámara"),
-    Exercise(name="Flexiones de Pecho",             sets=4, reps="12",    rest_seconds=30,  muscle_group="Pecho/Tríceps",     notes="⚡ Detectable en tiempo real con tu cámara"),
-    Exercise(name="Peso Muerto con Mancuernas",     sets=4, reps="12",    rest_seconds=30,  muscle_group="Cadena Posterior",  notes="Espalda neutra en todo momento"),
-    Exercise(name="Remo con Mancuerna",             sets=4, reps="12",    rest_seconds=30,  muscle_group="Espalda",           notes="Alterna brazos o bilateral"),
-    Exercise(name="Mountain Climbers",              sets=4, reps="30 seg",rest_seconds=20,  muscle_group="Core/Cardio",       notes="Máxima velocidad manteniendo caderas bajas"),
+    Exercise(name="Flexiones de Pecho",             sets=4, reps="12",    rest_seconds=30,  muscle_group="Pecho/TrÃ­ceps",     notes="âš¡ Detectable en tiempo real con tu cÃ¡mara"),
+    Exercise(name="Mountain Climbers",              sets=4, reps="30 seg",rest_seconds=20,  muscle_group="Core/Cardio",       notes="MÃ¡xima velocidad manteniendo caderas bajas"),
+    Exercise(name="Polichinelas",                   sets=4, reps="40 seg",rest_seconds=20,  muscle_group="Cardio/Full Body",  mode="timer", notes="Salta abriendo piernas y brazos a ritmo constante. âš¡ Detectable en tiempo real con tu cÃ¡mara"),
     Exercise(name="Burpees",                        sets=3, reps="10",    rest_seconds=45,  muscle_group="Full Body",         notes="Pecho toca el suelo en cada rep"),
 ]
 
 FAT_LOSS_CIRCUIT_B = [
-    Exercise(name="Zancadas Alternadas con Salto",  sets=4, reps="10 c/lado", rest_seconds=30, muscle_group="Piernas/Glúteos", notes="Aterriza suave, rodilla a 90°"),
-    Exercise(name="Press de Hombros con Mancuernas",sets=4, reps="12",    rest_seconds=30,  muscle_group="Hombros",           notes="Ritmo controlado en bajada"),
-    Exercise(name="Hip Thrust con Peso Corporal",   sets=4, reps="15",    rest_seconds=30,  muscle_group="Glúteos",           notes="Aprieta glúteos 1 seg arriba"),
-    Exercise(name="Remo Invertido en Barra",        sets=4, reps="12",    rest_seconds=30,  muscle_group="Espalda",           notes="Cuerpo recto"),
-    Exercise(name="Plank con Rotación",             sets=3, reps="30 seg",rest_seconds=20,  muscle_group="Core",              notes="Caderas estables al rotar"),
-    Exercise(name="Saltos en Caja (Step)",          sets=3, reps="10",    rest_seconds=45,  muscle_group="Piernas/Cardio",    notes="Aterriza con rodillas flexionadas"),
+    Exercise(name="Hip Thrust con Peso Corporal",   sets=4, reps="15",    rest_seconds=30,  muscle_group="GlÃºteos",           notes="Aprieta glÃºteos 1 seg arriba"),
+    Exercise(name="Plank con Rotación",             sets=3, reps="30 seg",rest_seconds=20,  muscle_group="Core",              mode="timer", notes="Caderas estables al rotar"),
 ]
 
 FAT_LOSS_CIRCUIT_C = [
-    Exercise(name="Sentadilla con Barra (Moderado)",sets=4, reps="12",    rest_seconds=45,  muscle_group="Piernas",           notes="Peso moderado, ritmo constante. ⚡ Detectable en tiempo real con tu cámara"),
-    Exercise(name="Press de Banca con Barra",       sets=4, reps="10",    rest_seconds=45,  muscle_group="Pecho",             notes="Peso que permita completar todas las reps"),
-    Exercise(name="Dominadas o Jalón al Pecho",     sets=4, reps="10",    rest_seconds=45,  muscle_group="Dorsal",            notes="Pausa 1 seg en contracción"),
-    Exercise(name="Peso Muerto Rumano",             sets=3, reps="12",    rest_seconds=60,  muscle_group="Cadena Posterior",  notes="Mayor tiempo bajo tensión"),
-    Exercise(name="Curl de Bíceps con Barra",       sets=3, reps="12",    rest_seconds=45,  muscle_group="Bíceps",            notes="⚡ Detectable en tiempo real con tu cámara"),
-    Exercise(name="Sprint en Cinta o Intervalo",    sets=6, reps="30 seg",rest_seconds=30,  muscle_group="Cardio",            notes="Alterna 30 seg al 90% / 30 seg caminando"),
 ]
 
 # Bajo impacto (Obesidad)
 FAT_LOSS_LOW_IMPACT_A = [
-    Exercise(name="Sentadilla al Cajón",            sets=3, reps="12",    rest_seconds=60,  muscle_group="Piernas/Glúteos",   notes="Usa silla como referencia de profundidad. ⚡ Detectable en tiempo real con tu cámara"),
-    Exercise(name="Flexiones en Pared o Rodillas",  sets=3, reps="12",    rest_seconds=60,  muscle_group="Pecho/Tríceps",     notes="Progresa a flexiones completas en 4-6 semanas. ⚡ Detectable en tiempo real con tu cámara"),
-    Exercise(name="Peso Muerto con Mancuernas",     sets=3, reps="12",    rest_seconds=60,  muscle_group="Cadena Posterior",  notes="Espalda neutra, sin curvar la lumbar"),
-    Exercise(name="Remo con Banda o Mancuerna",     sets=3, reps="12",    rest_seconds=60,  muscle_group="Espalda",           notes="Retrae escápulas al final del movimiento"),
-    Exercise(name="Marcha en Sitio Rodillas Altas", sets=3, reps="40 seg",rest_seconds=30,  muscle_group="Core/Cardio",       notes="Brazos activos para mayor gasto calórico"),
-    Exercise(name="Plank en Rodillas",              sets=3, reps="30 seg",rest_seconds=45,  muscle_group="Core",              notes="Progresa a plank completo cuando puedas"),
+    Exercise(name="Sentadilla al Cajón",            sets=3, reps="12",    rest_seconds=60,  muscle_group="Piernas/Glúteos",   notes="Usa silla como referencia de profundidad"),
+    Exercise(name="Flexiones en Pared o Rodillas",  sets=3, reps="12",    rest_seconds=60,  muscle_group="Pecho/TrÃ­ceps",     notes="Progresa a flexiones completas en 4-6 semanas. âš¡ Detectable en tiempo real con tu cÃ¡mara"),
+    Exercise(name="Flexiones de Pecho",             sets=3, reps="10-12", rest_seconds=60,  muscle_group="Pecho/TrÃ­ceps",     notes="MantÃ©n el cuerpo en lÃ­nea recta. âš¡ Detectable en tiempo real con tu cÃ¡mara"),
+    Exercise(name="Flexiones Diamante",             sets=2, reps="8-10",  rest_seconds=60,  muscle_group="Pecho/TrÃ­ceps",     notes="Ãšsalas cuando ya domines la variante en rodillas. âš¡ Detectable en tiempo real con tu cÃ¡mara"),
+    Exercise(name="Flexiones Rusas de Antebrazos",  sets=2, reps="6-8",   rest_seconds=60,  muscle_group="Pecho/TrÃ­ceps/Hombros", notes="VersiÃ³n corta y controlada para trabajar empuje desde antebrazos"),
+    Exercise(name="Zancadas Alternas por Tiempo",   sets=3, reps="40 seg",rest_seconds=45,  muscle_group="Piernas/GlÃºteos",   mode="timer", notes="Alterna piernas con control y torso erguido"),
+    Exercise(name="Saltos con Zancada Alterna",     sets=3, reps="30 seg",rest_seconds=60,  muscle_group="Piernas/GlÃºteos",   mode="timer", notes="Cambia de pierna en el aire con aterrizaje suave"),
+    Exercise(name="Marcha en Sitio Rodillas Altas", sets=3, reps="40 seg",rest_seconds=30,  muscle_group="Core/Cardio",       mode="timer", notes="Rodillas arriba y brazos activos. âš¡ Detectable en tiempo real con tu cÃ¡mara"),
+    Exercise(name="Remo con Mancuerna Apoyado en Banco", sets=3, reps="12 c/lado", rest_seconds=60, muscle_group="Espalda",   notes="Apoya una rodilla y una mano en el banco para estabilizar el torso"),
+    Exercise(name="Remo con Banda o Mancuerna",     sets=3, reps="12",    rest_seconds=60,  muscle_group="Espalda",           notes="Retrae escÃ¡pulas al final del movimiento"),
+    Exercise(name="Curl de Bíceps con Mancuernas",  sets=3, reps="12",    rest_seconds=60,  muscle_group="Bíceps",            notes="Sube controlado y evita balancear el torso"),
+    Exercise(name="Curl Martillo",                  sets=3, reps="10-12", rest_seconds=60,  muscle_group="BÃ­ceps/Braquial",   notes="Agarre neutro, codos pegados al cuerpo. âš¡ Detectable en tiempo real con tu cÃ¡mara"),
 ]
 
 FAT_LOSS_LOW_IMPACT_B = [
     Exercise(name="Estocadas Estáticas",            sets=3, reps="10 c/lado", rest_seconds=60, muscle_group="Piernas/Glúteos", notes="Sin salto, movimiento controlado"),
-    Exercise(name="Press de Hombros Sentado",       sets=3, reps="12",    rest_seconds=60,  muscle_group="Hombros",           notes="Mancuernas livianas, forma perfecta"),
-    Exercise(name="Hip Thrust en Suelo",            sets=3, reps="15",    rest_seconds=60,  muscle_group="Glúteos",           notes="Aprieta glúteos 2 seg en la cima"),
+    Exercise(name="Hip Thrust en Suelo",            sets=3, reps="15",    rest_seconds=60,  muscle_group="GlÃºteos",           notes="Aprieta glÃºteos 2 seg en la cima"),
     Exercise(name="Remo Sentado con Banda",         sets=3, reps="15",    rest_seconds=60,  muscle_group="Espalda",           notes="Jala hacia el abdomen, no la cintura"),
     Exercise(name="Elevaciones de Talones Sentado", sets=3, reps="20",    rest_seconds=30,  muscle_group="Gemelos",           notes="Pausa en punta, baja completo"),
-    Exercise(name="Caminata Activa o Bici Estática",sets=1, reps="20 min",rest_seconds=0,   muscle_group="Cardio",            notes="Zona 2: puedes mantener una conversación"),
+    Exercise(name="Polichinelas",                   sets=3, reps="45 seg",rest_seconds=30,  muscle_group="Cardio",            mode="timer", notes="Abre y cierra piernas y brazos a ritmo constante"),
+    Exercise(name="Plank",                          sets=3, reps="40 seg",rest_seconds=30,  muscle_group="Core",              mode="hold",  notes="Abdomen firme y pelvis neutra"),
+    Exercise(name="Plancha Lateral",                sets=3, reps="30 seg c/lado", rest_seconds=30, muscle_group="Core/Oblicuos", mode="hold", notes="Cadera arriba y cuello relajado"),
+    Exercise(name="Plank en Rodillas",              sets=3, reps="30 seg",rest_seconds=30,  muscle_group="Core",              mode="hold",  notes="Versión regresada para sostén de core"),
 ]
 
 FAT_LOSS_LOW_IMPACT_C = [
-    Exercise(name="Sentadilla al Cajón (Con Mancuernas)", sets=3, reps="12", rest_seconds=60, muscle_group="Piernas/Glúteos", notes="Agrega carga progresiva cada semana. ⚡ Detectable en tiempo real con tu cámara"),
-    Exercise(name="Curl de Bíceps con Mancuernas", sets=3, reps="12",    rest_seconds=60,  muscle_group="Bíceps",            notes="Control total, sin balanceo. ⚡ Detectable en tiempo real con tu cámara"),
-    Exercise(name="Press de Pecho con Mancuernas en Suelo", sets=3, reps="12", rest_seconds=60, muscle_group="Pecho",        notes="Rango de movimiento seguro sin banco"),
-    Exercise(name="Jalón con Banda al Pecho",       sets=3, reps="15",    rest_seconds=60,  muscle_group="Dorsal",            notes="Ancla la banda en algo alto y estable"),
-    Exercise(name="Elevación de Talones de Pie",    sets=3, reps="20",    rest_seconds=30,  muscle_group="Gemelos",           notes="Apoyo con la mano para equilibrio"),
-    Exercise(name="Caminata con Inclinación",       sets=1, reps="25 min",rest_seconds=0,   muscle_group="Cardio",            notes="3-5% inclinación, paso brioso"),
+    Exercise(name="Flexiones Diamante",             sets=3, reps="8-10",  rest_seconds=60,  muscle_group="Pecho/TrÃ­ceps",     notes="Variante exigente para trÃ­ceps y control del core. âš¡ Detectable en tiempo real con tu cÃ¡mara"),
+    Exercise(name="Flexiones Rusas de Antebrazos",  sets=2, reps="8",     rest_seconds=60,  muscle_group="Pecho/TrÃ­ceps/Hombros", notes="Controla la bajada a antebrazos y la subida a manos"),
 ]
 
-# ── MANTENIMIENTO ────────────────────────────────────────────────────────────
+# â”€â”€ MANTENIMIENTO â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 MAINTENANCE_FULL_A = [
-    Exercise(name="Sentadilla con Barra",           sets=3, reps="10-12", rest_seconds=90,  muscle_group="Piernas",           notes="⚡ Detectable en tiempo real con tu cámara"),
-    Exercise(name="Press de Banca",                 sets=3, reps="10-12", rest_seconds=90,  muscle_group="Pecho",             notes="Agarre a la anchura de hombros"),
-    Exercise(name="Dominadas o Jalón",              sets=3, reps="8-10",  rest_seconds=90,  muscle_group="Espalda",           notes="Pausa 1 seg en contracción"),
-    Exercise(name="Press Militar",                  sets=3, reps="10-12", rest_seconds=75,  muscle_group="Hombros",           notes="Core activo todo el tiempo"),
-    Exercise(name="Curl de Bíceps con Barra",       sets=3, reps="10-12", rest_seconds=60,  muscle_group="Bíceps",            notes="⚡ Detectable en tiempo real con tu cámara"),
-    Exercise(name="Extensión Tríceps en Polea",     sets=3, reps="10-12", rest_seconds=60,  muscle_group="Tríceps",           notes="Codos fijos al cuerpo"),
 ]
 
 MAINTENANCE_FULL_B = [
-    Exercise(name="Peso Muerto Convencional",       sets=3, reps="8-10",  rest_seconds=120, muscle_group="Cadena Posterior",  notes="Tirón del suelo, espalda neutra"),
-    Exercise(name="Press Inclinado",                sets=3, reps="10-12", rest_seconds=90,  muscle_group="Pecho Superior",    notes="Ángulo 30-45°"),
-    Exercise(name="Remo con Barra",                 sets=3, reps="10-12", rest_seconds=90,  muscle_group="Espalda",           notes="Codo 45° del torso"),
-    Exercise(name="Elevaciones Laterales",          sets=3, reps="12",    rest_seconds=60,  muscle_group="Hombros",           notes="Muy lentas en la bajada"),
-    Exercise(name="Zancadas con Mancuernas",        sets=3, reps="10 c/lado", rest_seconds=75, muscle_group="Piernas",        notes="Rodilla trasera 2 cm del suelo"),
     Exercise(name="Plank",                          sets=3, reps="45 seg",rest_seconds=45,  muscle_group="Core",              notes="Respira normal, no aguantes el aire"),
 ]
 
 MAINTENANCE_FULL_C = [
-    Exercise(name="Sentadilla con Mancuernas (Goblet)", sets=3, reps="12", rest_seconds=90, muscle_group="Piernas",          notes="Mancuerna al pecho, codos dentro. ⚡ Detectable en tiempo real con tu cámara"),
-    Exercise(name="Flexiones de Pecho",             sets=3, reps="12",    rest_seconds=75,  muscle_group="Pecho/Tríceps",     notes="⚡ Detectable en tiempo real con tu cámara"),
-    Exercise(name="Remo con Mancuerna",             sets=3, reps="12",    rest_seconds=75,  muscle_group="Espalda",           notes="Apoya en banco para estabilidad"),
-    Exercise(name="Curl Martillo",                  sets=3, reps="12",    rest_seconds=60,  muscle_group="Bíceps/Braquial",   notes="⚡ Detectable en tiempo real con tu cámara"),
-    Exercise(name="Hip Thrust con Mancuerna",       sets=3, reps="12",    rest_seconds=75,  muscle_group="Glúteos",           notes="Contracción glútea 2 seg arriba"),
-    Exercise(name="Plancha Lateral",                sets=3, reps="30 seg c/lado", rest_seconds=45, muscle_group="Core/Oblicuos", notes="Cadera arriba, cuerpo en línea recta"),
+    Exercise(name="Flexiones de Pecho",             sets=3, reps="12",    rest_seconds=75,  muscle_group="Pecho/TrÃ­ceps",     notes="âš¡ Detectable en tiempo real con tu cÃ¡mara"),
+    Exercise(name="Flexiones Rusas de Antebrazos",  sets=2, reps="8-10",  rest_seconds=75,  muscle_group="Pecho/TrÃ­ceps/Hombros", notes="Variante avanzada para pecho, trÃ­ceps y estabilidad del core"),
+    Exercise(name="Curl Martillo",                  sets=3, reps="12",    rest_seconds=60,  muscle_group="BÃ­ceps/Braquial",   notes="âš¡ Detectable en tiempo real con tu cÃ¡mara"),
+    Exercise(name="Hip Thrust con Mancuerna",       sets=3, reps="12",    rest_seconds=75,  muscle_group="GlÃºteos",           notes="ContracciÃ³n glÃºtea 2 seg arriba"),
+    Exercise(name="Plancha Lateral",                sets=3, reps="30 seg c/lado", rest_seconds=45, muscle_group="Core/Oblicuos", notes="Cadera arriba, cuerpo en lÃ­nea recta"),
+    Exercise(name="Plank",                          sets=3, reps="45 seg",rest_seconds=30,  muscle_group="Core",              mode="hold",  notes="MantÃ©n el abdomen activo y la espalda neutra"),
 ]
 
 MAINTENANCE_UNDERWEIGHT_A = [
-    Exercise(name="Sentadilla con Barra",           sets=4, reps="8-10",  rest_seconds=120, muscle_group="Piernas",           notes="Progresa el peso cada semana. ⚡ Detectable en tiempo real con tu cámara"),
-    Exercise(name="Press de Banca con Barra",       sets=4, reps="8-10",  rest_seconds=120, muscle_group="Pecho",             notes="Carga progresiva, no sacrifiques técnica"),
-    Exercise(name="Dominadas o Jalón al Pecho",     sets=4, reps="8-10",  rest_seconds=120, muscle_group="Espalda",           notes="Añade peso si puedes hacer más de 10"),
-    Exercise(name="Press Militar con Barra",        sets=3, reps="8-10",  rest_seconds=90,  muscle_group="Hombros",           notes="Empuje explosivo, bajada controlada"),
-    Exercise(name="Curl de Bíceps con Barra",       sets=3, reps="10-12", rest_seconds=75,  muscle_group="Bíceps",            notes="⚡ Detectable en tiempo real con tu cámara"),
-    Exercise(name="Extensión de Tríceps en Polea",  sets=3, reps="10-12", rest_seconds=75,  muscle_group="Tríceps",           notes="Codos fijos"),
 ]
 
 MAINTENANCE_UNDERWEIGHT_B = [
-    Exercise(name="Peso Muerto Convencional",       sets=4, reps="6-8",   rest_seconds=150, muscle_group="Cadena Posterior",  notes="Ejercicio clave para ganar masa total"),
-    Exercise(name="Press Inclinado con Mancuernas", sets=4, reps="8-10",  rest_seconds=90,  muscle_group="Pecho Superior",    notes="Mayor activación del pectoral superior"),
-    Exercise(name="Remo con Barra",                 sets=4, reps="8-10",  rest_seconds=120, muscle_group="Espalda Media",     notes="Peso creciente cada sesión"),
-    Exercise(name="Elevaciones Laterales",          sets=3, reps="12",    rest_seconds=60,  muscle_group="Hombros",           notes="4 series si ya dominas el peso"),
-    Exercise(name="Zancadas con Mancuernas",        sets=3, reps="10 c/lado", rest_seconds=90, muscle_group="Piernas",        notes="Añade peso cada 2 semanas"),
-    Exercise(name="Curl Martillo",                  sets=3, reps="10-12", rest_seconds=60,  muscle_group="Braquial",          notes="⚡ Detectable en tiempo real con tu cámara"),
+    Exercise(name="Curl Martillo",                  sets=3, reps="10-12", rest_seconds=60,  muscle_group="Braquial",          notes="âš¡ Detectable en tiempo real con tu cÃ¡mara"),
 ]
 
 MAINTENANCE_UNDERWEIGHT_C = [
-    Exercise(name="Sentadilla Frontal",             sets=4, reps="8-10",  rest_seconds=120, muscle_group="Cuádriceps",        notes="Mayor activación de cuádriceps. ⚡ Detectable en tiempo real con tu cámara"),
-    Exercise(name="Flexiones con Lastre",           sets=4, reps="8-10",  rest_seconds=90,  muscle_group="Pecho/Tríceps",     notes="Usa mochila con peso o chaleco. ⚡ Detectable en tiempo real con tu cámara"),
-    Exercise(name="Jalón Agarre Estrecho",          sets=4, reps="8-10",  rest_seconds=90,  muscle_group="Dorsal/Bíceps",     notes="Mayor contracción del dorsal"),
-    Exercise(name="Hip Thrust con Barra",           sets=3, reps="10-12", rest_seconds=90,  muscle_group="Glúteos/Isquios",   notes="Carga progresiva semana a semana"),
-    Exercise(name="Curl de Bíceps Predicador",      sets=3, reps="10-12", rest_seconds=75,  muscle_group="Bíceps",            notes="Codo en el pad, sin trampa"),
-    Exercise(name="Press Francés con Barra EZ",     sets=3, reps="10-12", rest_seconds=75,  muscle_group="Tríceps",           notes="Baja a la frente con control total"),
+    Exercise(name="Hip Thrust con Barra",           sets=3, reps="10-12", rest_seconds=90,  muscle_group="GlÃºteos/Isquios",   notes="Carga progresiva semana a semana"),
 ]
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 #  IMC
-# ─────────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def calculate_imc(weight_kg: float, height_cm: float) -> tuple[float, str]:
     imc = round(weight_kg / ((height_cm / 100) ** 2), 1)
@@ -271,13 +301,21 @@ def calculate_imc(weight_kg: float, height_cm: float) -> tuple[float, str]:
         return imc, "Obesidad"
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  ADAPTACIÓN POR IMC
-# ─────────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+#  ADAPTACIÃ“N POR IMC
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _adapt_exercise(ex: Exercise, imc_category: Optional[str]) -> Exercise:
     if imc_category is None:
-        return ex
+        return Exercise(
+            name=ex.name,
+            sets=ex.sets,
+            reps=ex.reps,
+            rest_seconds=ex.rest_seconds,
+            muscle_group=ex.muscle_group,
+            mode=_infer_exercise_mode(ex),
+            notes=ex.notes,
+        )
 
     sets = ex.sets
     rest = ex.rest_seconds
@@ -286,23 +324,23 @@ def _adapt_exercise(ex: Exercise, imc_category: Optional[str]) -> Exercise:
     if imc_category == "Bajo peso":
         sets = min(sets + 1, 5)
         rest = min(rest + 30, 150)
-        suffix = "Prioriza comer en superávit calórico (+300-500 kcal/día)."
-        notes = f"{notes} · {suffix}" if notes else suffix
+        suffix = "Prioriza comer en superÃ¡vit calÃ³rico (+300-500 kcal/dÃ­a)."
+        notes = f"{notes} Â· {suffix}" if notes else suffix
 
     elif imc_category == "Sobrepeso":
         rest = max(rest - 15, 20)
         suffix = "Descanso activo: marcha en sitio entre series."
-        notes = f"{notes} · {suffix}" if notes else suffix
+        notes = f"{notes} Â· {suffix}" if notes else suffix
 
     elif imc_category == "Obesidad":
         sets = max(sets - 1, 2)
         rest = rest + 30
-        suffix = "Rango de movimiento cómodo. Para si sientes dolor articular."
-        notes = f"{notes} · {suffix}" if notes else suffix
+        suffix = "Rango de movimiento cÃ³modo. Para si sientes dolor articular."
+        notes = f"{notes} Â· {suffix}" if notes else suffix
 
     return Exercise(
         name=ex.name, sets=sets, reps=ex.reps,
-        rest_seconds=rest, muscle_group=ex.muscle_group, notes=notes,
+        rest_seconds=rest, muscle_group=ex.muscle_group, mode=_infer_exercise_mode(ex), notes=notes,
     )
 
 
@@ -310,9 +348,9 @@ def _adapt_list(exercises: list[Exercise], imc_category: Optional[str]) -> list[
     return [_adapt_exercise(e, imc_category) for e in exercises]
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  GROQ — RECOMENDACIÓN DE VARIANTE
-# ─────────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+#  GROQ â€” RECOMENDACIÃ“N DE VARIANTE
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def get_groq_recommendation(
     goal: str,
@@ -326,14 +364,14 @@ def get_groq_recommendation(
 ) -> dict:
     """
     Llama a Groq para:
-    1. Recomendar cuál de las 3 variantes (A/B/C) conviene más al usuario.
+    1. Recomendar cuÃ¡l de las 3 variantes (A/B/C) conviene mÃ¡s al usuario.
     2. Generar un coaching_tip personalizado basado en su perfil.
 
     Retorna:
         {
           "variante_recomendada": "A" | "B" | "C",
-          "razon": "Texto corto explicando por qué",
-          "coaching_tip": "Consejo personalizado de 2-3 líneas"
+          "razon": "Texto corto explicando por quÃ©",
+          "coaching_tip": "Consejo personalizado de 2-3 lÃ­neas"
         }
     """
     groq_api_key = os.getenv("GROQ_API_KEY")
@@ -341,8 +379,8 @@ def get_groq_recommendation(
         # Sin clave: devuelve defaults razonables
         return {
             "variante_recomendada": "A",
-            "razon": "Variante estándar recomendada por defecto.",
-            "coaching_tip": "Mantén una progresión constante aumentando el peso un 2.5-5% cada semana.",
+            "razon": "Variante estÃ¡ndar recomendada por defecto.",
+            "coaching_tip": "MantÃ©n una progresiÃ³n constante aumentando el peso un 2.5-5% cada semana.",
         }
 
     client = Groq(api_key=groq_api_key)
@@ -367,10 +405,10 @@ def get_groq_recommendation(
 
 Las tres variantes de plan disponibles son:{variantes_str}
 
-Responde ÚNICAMENTE con un JSON válido (sin texto extra, sin markdown) con esta estructura:
+Responde ÃšNICAMENTE con un JSON vÃ¡lido (sin texto extra, sin markdown) con esta estructura:
 {{
   "variante_recomendada": "A" o "B" o "C",
-  "razon": "Explicación breve (máximo 2 oraciones) de por qué esta variante es la mejor para este perfil",
+  "razon": "ExplicaciÃ³n breve (mÃ¡ximo 2 oraciones) de por quÃ© esta variante es la mejor para este perfil",
   "coaching_tip": "Consejo personalizado de 2-3 oraciones considerando su IMC, meta y nivel de actividad"
 }}"""
 
@@ -389,14 +427,97 @@ Responde ÚNICAMENTE con un JSON válido (sin texto extra, sin markdown) con est
         print(f"[Groq error] {e}")
         return {
             "variante_recomendada": "A",
-            "razon": "Recomendación por defecto (error al conectar con IA).",
-            "coaching_tip": "Enfócate en la técnica antes de aumentar el peso. La consistencia supera a la intensidad.",
+            "razon": "RecomendaciÃ³n por defecto (error al conectar con IA).",
+            "coaching_tip": "EnfÃ³cate en la tÃ©cnica antes de aumentar el peso. La consistencia supera a la intensidad.",
         }
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  CONSTRUCTOR PRINCIPAL — 3 VARIANTES POR META
-# ─────────────────────────────────────────────────────────────────────────────
+# â”€â”€ CATÃLOGO FINAL EFECTIVO â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+def _exercise(
+    name: str,
+    sets: int,
+    reps: str,
+    rest_seconds: int,
+    muscle_group: str,
+    notes: str = "",
+    mode: Optional[str] = None,
+) -> Exercise:
+    return Exercise(
+        name=name,
+        sets=sets,
+        reps=reps,
+        rest_seconds=rest_seconds,
+        muscle_group=muscle_group,
+        mode=mode,
+        notes=notes,
+    )
+
+
+EXERCISE_CATALOG = {
+    "Sentadilla al CajÃ³n": _exercise("Sentadilla al CajÃ³n", 3, "12", 60, "Piernas/GlÃºteos", "Usa una silla como referencia de profundidad."),
+    "Zancadas Alternas por Tiempo": _exercise("Zancadas Alternas por Tiempo", 3, "40 seg", 45, "Piernas/GlÃºteos", "Alterna piernas con control y torso erguido.", mode="timer"),
+    "Saltos con Zancada Alterna": _exercise("Saltos con Zancada Alterna", 3, "30 seg", 60, "Piernas/GlÃºteos", "Cambia de pierna en el aire con aterrizaje suave.", mode="timer"),
+    "Estocadas EstÃ¡ticas": _exercise("Estocadas EstÃ¡ticas", 3, "10 c/lado", 60, "Piernas/GlÃºteos", "Sin salto, movimiento controlado."),
+    "Hip Thrust en Suelo": _exercise("Hip Thrust en Suelo", 3, "15", 60, "GlÃºteos", "Aprieta glÃºteos 2 segundos en la parte alta."),
+    "Elevaciones de Talones Sentado": _exercise("Elevaciones de Talones Sentado", 3, "20", 30, "Gemelos", "Pausa en punta y baja completo."),
+    "Flexiones en Pared o Rodillas": _exercise("Flexiones en Pared o Rodillas", 3, "12", 60, "Pecho/TrÃ­ceps", "Progresa a flexiones completas con el tiempo."),
+    "Flexiones de Pecho": _exercise("Flexiones de Pecho", 4, "10-12", 75, "Pecho/TrÃ­ceps", "Cuerpo en lÃ­nea recta durante todo el movimiento."),
+    "Flexiones Diamante": _exercise("Flexiones Diamante", 3, "8-10", 75, "Pecho/TrÃ­ceps", "Mayor Ã©nfasis en trÃ­ceps."),
+    "Flexiones Rusas de Antebrazos": _exercise("Flexiones Rusas de Antebrazos", 2, "6-8", 75, "Pecho/TrÃ­ceps/Hombros", "Baja a antebrazos y vuelve a extender con control."),
+    "Remo con Mancuerna Apoyado en Banco": _exercise("Remo con Mancuerna Apoyado en Banco", 3, "12 c/lado", 60, "Espalda", "Apoya una rodilla y una mano en el banco para estabilizar."),
+    "Remo con Banda o Mancuerna": _exercise("Remo con Banda o Mancuerna", 3, "12", 60, "Espalda", "Retrae escÃ¡pulas al final del movimiento."),
+    "Remo Sentado con Banda": _exercise("Remo Sentado con Banda", 3, "15", 60, "Espalda", "Jala hacia el abdomen, no la cintura."),
+    "Curl de BÃ­ceps con Mancuernas": _exercise("Curl de BÃ­ceps con Mancuernas", 3, "12", 60, "BÃ­ceps", "Sube controlado y evita balancear el torso."),
+    "Curl Martillo": _exercise("Curl Martillo", 3, "10-12", 60, "BÃ­ceps/Braquial", "Agarre neutro, codos pegados al cuerpo."),
+    "Press de Hombros Sentado": _exercise("Press de Hombros Sentado", 3, "12", 60, "Hombros", "Mancuernas livianas y forma perfecta."),
+    "Polichinelas": _exercise("Polichinelas", 4, "40 seg", 20, "Cardio/Full Body", "Ritmo constante abriendo piernas y brazos.", mode="timer"),
+    "Burpees": _exercise("Burpees", 3, "10", 45, "Full Body", "Pecho al suelo y salto controlado."),
+    "Marcha en Sitio Rodillas Altas": _exercise("Marcha en Sitio Rodillas Altas", 3, "40 seg", 30, "Core/Cardio", "Rodillas arriba y brazos activos.", mode="timer"),
+    "Mountain Climbers": _exercise("Mountain Climbers", 4, "30 seg", 20, "Core/Cardio", "MÃ¡xima velocidad con caderas bajas.", mode="timer"),
+    "Flexiones Cerradas": _exercise("Flexiones Cerradas", 3, "8-12", 75, "Pecho/TrÃ­ceps", "Codos pegados al cuerpo."),
+    "Plank": _exercise("Plank", 3, "40 seg", 30, "Core", "Abdomen firme y pelvis neutra.", mode="hold"),
+    "Plancha Lateral": _exercise("Plancha Lateral", 3, "30 seg c/lado", 30, "Core/Oblicuos", "Cadera alta y cuerpo alineado.", mode="hold"),
+    "Superman Hold": _exercise("Superman Hold", 3, "30 seg", 30, "Core/Espalda Baja", "Eleva brazos y piernas sin comprimir la lumbar.", mode="hold"),
+    "Wall Sit": _exercise("Wall Sit", 3, "40 seg", 30, "Piernas/Core", "Rodillas a 90Â° y espalda pegada a la pared.", mode="hold"),
+    "Bicicleta EstÃ¡tica": _exercise("Bicicleta EstÃ¡tica", 1, "15 min", 0, "Cardio", "Cadencia moderada y constante.", mode="timer"),
+    "Caminadora o Caminata Activa": _exercise("Caminadora o Caminata Activa", 1, "15 min", 0, "Cardio", "Paso sostenido para recuperaciÃ³n activa.", mode="timer"),
+    "Trote Suave en el Sitio": _exercise("Trote Suave en el Sitio", 3, "60 seg", 30, "Cardio", "Impacto ligero y ritmo estable.", mode="timer"),
+    "Movilidad de Cadera": _exercise("Movilidad de Cadera", 2, "45 seg", 20, "Movilidad", "CÃ­rculos amplios y controlados.", mode="timer"),
+    "RotaciÃ³n TorÃ¡cica": _exercise("RotaciÃ³n TorÃ¡cica", 2, "45 seg", 20, "Movilidad", "Rota desde la parte alta de la espalda.", mode="timer"),
+    "Movilidad de Hombros": _exercise("Movilidad de Hombros", 2, "45 seg", 20, "Movilidad", "Movimiento suave y sin dolor.", mode="timer"),
+    "Caminata Activa o Bici EstÃ¡tica": _exercise("Caminata Activa o Bici EstÃ¡tica", 1, "20 min", 0, "Cardio", "Zona 2: puedes mantener una conversaciÃ³n.", mode="timer"),
+    "Sentadilla con Salto": _exercise("Sentadilla con Salto", 4, "12", 30, "Piernas/Cardio", "Salta y aterriza suave."),
+}
+
+
+def _pick_exercises(*names: str) -> list[Exercise]:
+    return [EXERCISE_CATALOG[name].model_copy(deep=True) for name in names]
+
+
+HYPERTROPHY_PUSH_A = _pick_exercises("Flexiones en Pared o Rodillas", "Flexiones de Pecho", "Flexiones Diamante", "Flexiones Cerradas", "Flexiones Rusas de Antebrazos", "Press de Hombros Sentado")
+HYPERTROPHY_PUSH_B = _pick_exercises("Flexiones de Pecho", "Flexiones Diamante", "Flexiones Cerradas", "Flexiones Rusas de Antebrazos", "Press de Hombros Sentado")
+HYPERTROPHY_PULL_A = _pick_exercises("Remo con Mancuerna Apoyado en Banco", "Remo con Banda o Mancuerna", "Remo Sentado con Banda", "Curl de BÃ­ceps con Mancuernas", "Curl Martillo")
+HYPERTROPHY_PULL_B = _pick_exercises("Remo con Banda o Mancuerna", "Remo Sentado con Banda", "Remo con Mancuerna Apoyado en Banco", "Curl de BÃ­ceps con Mancuernas", "Curl Martillo")
+HYPERTROPHY_LEGS_A = _pick_exercises("Sentadilla al CajÃ³n", "Zancadas Alternas por Tiempo", "Saltos con Zancada Alterna", "Estocadas EstÃ¡ticas", "Hip Thrust en Suelo", "Elevaciones de Talones Sentado")
+HYPERTROPHY_LEGS_B = _pick_exercises("Sentadilla al CajÃ³n", "Estocadas EstÃ¡ticas", "Zancadas Alternas por Tiempo", "Saltos con Zancada Alterna", "Hip Thrust en Suelo", "Elevaciones de Talones Sentado")
+
+FAT_LOSS_CIRCUIT_A = _pick_exercises("Sentadilla con Salto", "Flexiones de Pecho", "Mountain Climbers", "Polichinelas", "Burpees", "Marcha en Sitio Rodillas Altas")
+FAT_LOSS_CIRCUIT_B = _pick_exercises("Saltos con Zancada Alterna", "Polichinelas", "Mountain Climbers", "Burpees", "Plank", "Marcha en Sitio Rodillas Altas")
+FAT_LOSS_LOW_IMPACT_A = _pick_exercises("Sentadilla al CajÃ³n", "Flexiones en Pared o Rodillas", "Flexiones de Pecho", "Flexiones Diamante", "Flexiones Rusas de Antebrazos", "Zancadas Alternas por Tiempo", "Saltos con Zancada Alterna", "Marcha en Sitio Rodillas Altas", "Remo con Mancuerna Apoyado en Banco", "Remo con Banda o Mancuerna", "Curl de BÃ­ceps con Mancuernas", "Curl Martillo")
+FAT_LOSS_LOW_IMPACT_B = _pick_exercises("Estocadas EstÃ¡ticas", "Press de Hombros Sentado", "Hip Thrust en Suelo", "Remo Sentado con Banda", "Elevaciones de Talones Sentado", "Plank", "Plancha Lateral", "Superman Hold", "Wall Sit", "Bicicleta EstÃ¡tica", "Caminadora o Caminata Activa", "Trote Suave en el Sitio", "Movilidad de Cadera", "RotaciÃ³n TorÃ¡cica", "Movilidad de Hombros", "Caminata Activa o Bici EstÃ¡tica")
+FAT_LOSS_LOW_IMPACT_C = _pick_exercises("Sentadilla al CajÃ³n", "Curl de BÃ­ceps con Mancuernas", "Flexiones de Pecho", "Flexiones Diamante", "Flexiones Rusas de Antebrazos", "Mountain Climbers")
+
+MAINTENANCE_FULL_A = _pick_exercises("Sentadilla al CajÃ³n", "Flexiones en Pared o Rodillas", "Remo con Banda o Mancuerna", "Curl de BÃ­ceps con Mancuernas", "Press de Hombros Sentado")
+MAINTENANCE_FULL_B = _pick_exercises("Estocadas EstÃ¡ticas", "Hip Thrust en Suelo", "Remo Sentado con Banda", "Elevaciones de Talones Sentado", "Plank")
+MAINTENANCE_FULL_C = _pick_exercises("Sentadilla al CajÃ³n", "Flexiones de Pecho", "Flexiones Rusas de Antebrazos", "Remo con Mancuerna Apoyado en Banco", "Curl Martillo", "Hip Thrust en Suelo", "Plancha Lateral", "Plank", "Bicicleta EstÃ¡tica", "Caminadora o Caminata Activa", "Movilidad de Cadera", "RotaciÃ³n TorÃ¡cica")
+MAINTENANCE_UNDERWEIGHT_A = _pick_exercises("Sentadilla al CajÃ³n", "Flexiones de Pecho", "Remo con Mancuerna Apoyado en Banco", "Press de Hombros Sentado", "Flexiones Cerradas")
+MAINTENANCE_UNDERWEIGHT_B = _pick_exercises("Estocadas EstÃ¡ticas", "Flexiones Diamante", "Remo con Banda o Mancuerna", "Press de Hombros Sentado", "Hip Thrust en Suelo", "Curl Martillo")
+MAINTENANCE_UNDERWEIGHT_C = _pick_exercises("Sentadilla al CajÃ³n", "Flexiones Rusas de Antebrazos", "Remo Sentado con Banda", "Hip Thrust en Suelo", "Curl de BÃ­ceps con Mancuernas")
+
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+#  CONSTRUCTOR PRINCIPAL â€” 3 VARIANTES POR META
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def build_plans(
     goal: str,
@@ -408,7 +529,7 @@ def build_plans(
     sexo: Optional[str] = None,
 ) -> dict:
     """
-    Genera las 3 variantes de plan + recomendación Groq.
+    Genera las 3 variantes de plan + recomendaciÃ³n Groq.
 
     Retorna:
     {
@@ -430,42 +551,62 @@ def build_plans(
         imc, imc_category = calculate_imc(weight_kg, height_cm)
 
     freq_map   = {"baja": 2, "media": 4, "alta": 6}
-    freq_label = {"baja": "Baja (1-2 días)", "media": "Media (3-4 días)", "alta": "Alta (5-6 días)"}
+    freq_label = {"baja": "Baja (1-2 dÃ­as)", "media": "Media (3-4 dÃ­as)", "alta": "Alta (5-6 dÃ­as)"}
     days_per_week = freq_map.get(frequency, 4)
     goal_lower = goal.lower()
 
     variantes: dict[str, TrainingPlan] = {}
 
-    # ══════════════════════════════════════
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     #  HIPERTROFIA
-    # ══════════════════════════════════════
-    if "muscular" in goal_lower or "masa" in goal_lower or "músculo" in goal_lower or "musculo" in goal_lower:
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    if "muscular" in goal_lower or "masa" in goal_lower or "mÃºsculo" in goal_lower or "musculo" in goal_lower:
 
         def _hypertrophy_plan(push, pull, legs, variant_label, desc, intensity):
-            push = _adapt_list(push, imc_category)
-            pull = _adapt_list(pull, imc_category)
-            legs = _adapt_list(legs, imc_category)
+            push_pool = _prepare_exercise_pool(push, imc_category)
+            pull_pool = _prepare_exercise_pool(pull, imc_category)
+            legs_pool = _prepare_exercise_pool(legs, imc_category)
+
+            push_focus = _filter_exercises(push_pool, ["pecho", "banca", "inclinado", "press", "apertura", "fly", "flexion", "flexiones", "diamante"])
+            chest_focus = _filter_exercises(push_pool, ["pecho", "banca", "inclinado", "apertura", "fly", "flexion", "flexiones"])
+            shoulder_focus = _filter_exercises(push_pool + pull_pool, ["hombro", "deltoides", "arnold", "laterales", "frontal"])
+            triceps_focus = _filter_exercises(push_pool, ["trÃ­ceps", "patada", "skullcrusher", "francÃ©s", "fondos", "diamante", "cerradas"])
+            pull_focus = _filter_exercises(pull_pool, ["dorsal", "espalda", "remo", "jalÃ³n", "dominadas", "face", "peso muerto", "cadena posterior"])
+            biceps_focus = _filter_exercises(pull_pool, ["bÃ­ceps", "biceps", "curl", "braquial"])
+            back_biceps_focus = pull_focus[:3] + biceps_focus[:3]
+            legs_focus = _filter_exercises(legs_pool, ["cuÃ¡driceps", "cuadriceps", "sentadilla", "prensa", "zancadas", "glÃºteos", "gluteos", "isqui", "gemelos", "hip thrust", "peso muerto"])
+            posterior_focus = _filter_exercises(legs_pool, ["isqui", "glÃºteos", "gluteos", "peso muerto", "hip thrust", "curl femoral", "sumo"])
 
             if days_per_week == 2:
                 days = [
-                    WorkoutDay(day_number=1, day_name="Día 1 — Full Body A", focus="Piernas, Pecho, Hombros", exercises=push[:3] + legs[:3]),
-                    WorkoutDay(day_number=2, day_name="Día 2 — Full Body B", focus="Espalda, Bíceps, Piernas", exercises=pull[:3] + legs[3:]),
+                    _build_workout_day(
+                        1,
+                        "DÃ­a 1 â€” Pecho, Espalda y Piernas",
+                        "Pecho, Espalda, Piernas, Core",
+                        push_focus[:2] + pull_focus[:2] + legs_focus[:3],
+                    ),
+                    _build_workout_day(
+                        2,
+                        "DÃ­a 2 â€” Hombros, Brazos y GlÃºteos",
+                        "Hombros, Espalda, GlÃºteos, Brazos",
+                        shoulder_focus[:2] + pull_focus[2:4] + posterior_focus[:3] + biceps_focus[:2],
+                    ),
                 ]
             elif days_per_week == 4:
                 days = [
-                    WorkoutDay(day_number=1, day_name="Día 1 — Push (Empuje)",      focus="Pecho, Hombros, Tríceps",          exercises=push),
-                    WorkoutDay(day_number=2, day_name="Día 2 — Pull (Jalón)",        focus="Espalda, Bíceps, Deltoides Post.", exercises=pull),
-                    WorkoutDay(day_number=3, day_name="Día 3 — Piernas",             focus="Cuádriceps, Glúteos, Gemelos",     exercises=legs),
-                    WorkoutDay(day_number=4, day_name="Día 4 — Upper Body Fuerza",   focus="Pecho, Espalda, Hombros",          exercises=push[:3] + pull[:3]),
+                    _build_workout_day(1, "DÃ­a 1 â€” Pecho y TrÃ­ceps", "Pecho, TrÃ­ceps", chest_focus + triceps_focus),
+                    _build_workout_day(2, "DÃ­a 2 â€” Espalda y BÃ­ceps", "Espalda, BÃ­ceps, Deltoides posterior", back_biceps_focus + _filter_exercises(pull_pool, ["posterior", "face"])),
+                    _build_workout_day(3, "DÃ­a 3 â€” Piernas y GlÃºteos", "CuÃ¡driceps, GlÃºteos, Isquiotibiales, Gemelos", legs_focus),
+                    _build_workout_day(4, "DÃ­a 4 â€” Hombros y Abdomen", "Deltoides, Brazos, Core", shoulder_focus + triceps_focus + biceps_focus),
                 ]
-            else:  # alta — PPL x2
+            else:  # alta
                 days = [
-                    WorkoutDay(day_number=1, day_name="Día 1 — Push A",    focus="Pecho, Hombros, Tríceps",    exercises=push),
-                    WorkoutDay(day_number=2, day_name="Día 2 — Pull A",    focus="Espalda, Bíceps",            exercises=pull),
-                    WorkoutDay(day_number=3, day_name="Día 3 — Piernas A", focus="Cuádriceps, Glúteos, Gemelos",exercises=legs),
-                    WorkoutDay(day_number=4, day_name="Día 4 — Push B",    focus="Pecho, Hombros, Tríceps",    exercises=push),
-                    WorkoutDay(day_number=5, day_name="Día 5 — Pull B",    focus="Espalda, Bíceps",            exercises=pull),
-                    WorkoutDay(day_number=6, day_name="Día 6 — Piernas B", focus="Isquios, Glúteos, Gemelos",  exercises=legs),
+                    _build_workout_day(1, "DÃ­a 1 â€” Pecho y TrÃ­ceps A", "Pecho, TrÃ­ceps", chest_focus + triceps_focus),
+                    _build_workout_day(2, "DÃ­a 2 â€” Espalda y BÃ­ceps A", "Espalda, BÃ­ceps", back_biceps_focus),
+                    _build_workout_day(3, "DÃ­a 3 â€” Piernas y GlÃºteos A", "CuÃ¡driceps, GlÃºteos, Gemelos", legs_focus),
+                    _build_workout_day(4, "DÃ­a 4 â€” Pecho y Hombros B", "Pecho superior, Deltoides, TrÃ­ceps", list(reversed(chest_focus)) + shoulder_focus[:2] + triceps_focus[:1]),
+                    _build_workout_day(5, "DÃ­a 5 â€” Espalda y BÃ­ceps B", "Espalda media, BÃ­ceps, Trapecio", list(reversed(pull_focus[:3])) + biceps_focus[:3] + _filter_exercises(pull_pool, ["trapecio", "face"])),
+                    _build_workout_day(6, "DÃ­a 6 â€” Abdomen y Cardio", "Core, acondicionamiento, recuperaciÃ³n activa", posterior_focus + legs_focus[:2]),
                 ]
 
             return TrainingPlan(
@@ -480,119 +621,188 @@ def build_plans(
             base_desc = "Hipertrofia adaptada: cargas progresivas con rango de movimiento ajustado para proteger articulaciones."
         elif imc_category == "Bajo peso":
             intensity = "Alta"
-            base_desc = "Hipertrofia con volumen extra. Come en superávit de 300-500 kcal/día para maximizar ganancias."
+            base_desc = "Hipertrofia con volumen extra. Come en superÃ¡vit de 300-500 kcal/dÃ­a para maximizar ganancias."
         else:
             intensity = "Alta"
-            base_desc = "Hipertrofia clásica (8-12 reps). Progresión de carga obligatoria para estimular el crecimiento."
+            base_desc = "Hipertrofia clÃ¡sica (8-12 reps). ProgresiÃ³n de carga obligatoria para estimular el crecimiento."
 
         variantes["A"] = _hypertrophy_plan(
             HYPERTROPHY_PUSH_A, HYPERTROPHY_PULL_A, HYPERTROPHY_LEGS_A, "A",
-            f"{base_desc} Variante A: énfasis en ejercicios con barra (mayor sobrecarga).", intensity,
+            f"{base_desc} Variante A: Ã©nfasis en ejercicios con barra (mayor sobrecarga).", intensity,
         )
         variantes["B"] = _hypertrophy_plan(
             HYPERTROPHY_PUSH_B, HYPERTROPHY_PULL_B, HYPERTROPHY_LEGS_B, "B",
-            f"{base_desc} Variante B: mezcla de barra y mancuernas, más variedad de ángulos.", intensity,
+            f"{base_desc} Variante B: mezcla de barra y mancuernas, mÃ¡s variedad de Ã¡ngulos.", intensity,
         )
         variantes["C"] = _hypertrophy_plan(
             HYPERTROPHY_PUSH_C, HYPERTROPHY_PULL_C, HYPERTROPHY_LEGS_C, "C",
-            f"{base_desc} Variante C: énfasis en mancuernas y poleas para mayor rango de movimiento.", intensity,
+            f"{base_desc} Variante C: Ã©nfasis en mancuernas y poleas para mayor rango de movimiento.", intensity,
         )
 
-    # ══════════════════════════════════════
-    #  PÉRDIDA DE GRASA
-    # ══════════════════════════════════════
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    #  PÃ‰RDIDA DE GRASA
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     elif "grasa" in goal_lower or "perder" in goal_lower:
 
         use_low_impact = (imc_category == "Obesidad")
 
         def _fat_loss_plan(circuit_a, circuit_b, variant_label, desc, intensity):
-            ca = _adapt_list(circuit_a, imc_category)
-            cb = _adapt_list(circuit_b, imc_category)
+            ca_pool = _prepare_exercise_pool(circuit_a, imc_category)
+            cb_pool = _prepare_exercise_pool(circuit_b, imc_category)
+
+            lower_focus = _filter_exercises(
+                ca_pool + cb_pool,
+                ["sentadilla", "zancada", "estocada", "pierna", "glÃºteos", "gluteos", "peso muerto", "hip thrust", "gemelos", "cajÃ³n", "salto"],
+            )
+            upper_push = _filter_exercises(
+                ca_pool + cb_pool,
+                ["flexion", "flexiones", "press", "hombro", "pecho", "trÃ­ceps", "triceps"],
+            )
+            chest_triceps = _filter_exercises(
+                ca_pool + cb_pool,
+                ["flexion", "flexiones", "pecho", "trÃ­ceps", "triceps", "diamante", "cerradas", "fondos"],
+            )
+            back_biceps = _filter_exercises(
+                ca_pool + cb_pool,
+                ["remo", "jalÃ³n", "jalon", "dominadas", "espalda", "peso muerto", "cadena posterior"],
+            )
+            biceps_only = _filter_exercises(
+                ca_pool + cb_pool,
+                ["bÃ­ceps", "biceps", "curl", "braquial"],
+            )
+            upper_pull = _filter_exercises(
+                ca_pool + cb_pool,
+                ["remo", "jalÃ³n", "jalon", "dominadas", "espalda", "bÃ­ceps", "biceps", "curl", "peso muerto", "cadena posterior"],
+            )
+            conditioning = _filter_exercises(
+                ca_pool + cb_pool,
+                ["burpee", "sprint", "cardio", "marcha", "caminata", "bici", "mountain", "intervalo", "hiit", "saltos"],
+            )
+            core_focus = _filter_exercises(
+                ca_pool + cb_pool,
+                ["core", "plank", "plancha", "rotaciÃ³n", "rotacion", "superman", "abdominal"],
+            )
+            cardio_live = _filter_exercises(
+                ca_pool + cb_pool,
+                ["polichinelas", "burpee", "mountain", "marcha", "rodillas altas", "saltos"],
+            )
+            mobility_focus = _filter_exercises(
+                ca_pool + cb_pool,
+                ["movilidad", "estiramientos", "rotaciÃ³n", "rotacion", "caminata", "bici", "torÃ¡cica", "toracica", "cadera", "hombros"],
+            )
 
             if days_per_week == 2:
                 days = [
-                    WorkoutDay(day_number=1, day_name="Día 1 — Circuito Full Body A", focus="Full Body + Core",   exercises=ca),
-                    WorkoutDay(day_number=2, day_name="Día 2 — Circuito Full Body B", focus="Full Body + Cardio", exercises=cb),
+                    _build_workout_day(1, "DÃ­a 1 â€” Piernas y GlÃºteos", "Piernas, GlÃºteos", lower_focus[:5] + conditioning[:1]),
+                    _build_workout_day(2, "DÃ­a 2 â€” Tren Superior y Cardio", "Pecho, Espalda, Hombros, Cardio", upper_push[:3] + upper_pull[:2] + conditioning[:2]),
                 ]
             elif days_per_week == 4:
                 days = [
-                    WorkoutDay(day_number=1, day_name="Día 1 — Inferior + Core",  focus="Piernas, Glúteos, Core",  exercises=ca[:3] + cb[2:4]),
-                    WorkoutDay(day_number=2, day_name="Día 2 — Superior Push",    focus="Pecho, Hombros",          exercises=ca[1:4]),
-                    WorkoutDay(day_number=3, day_name="Día 3 — Full Body A",      focus="Full Body + Cardio",      exercises=ca),
-                    WorkoutDay(day_number=4, day_name="Día 4 — Full Body B",      focus="Full Body + HIIT",        exercises=cb),
+                    _build_workout_day(1, "DÃ­a 1 â€” Piernas y GlÃºteos", "Piernas, GlÃºteos", lower_focus[:6]),
+                    _build_workout_day(2, "DÃ­a 2 â€” Pecho y TrÃ­ceps", "Pecho, TrÃ­ceps", chest_triceps[:5]),
+                    _build_workout_day(3, "DÃ­a 3 â€” Espalda y BÃ­ceps", "Espalda, BÃ­ceps", back_biceps[:3] + biceps_only[:2]),
+                    _build_workout_day(4, "DÃ­a 4 â€” Abdomen y Cardio", "HIIT, Cardio, Movilidad", conditioning[:4] + core_focus[:1]),
                 ]
             else:
-                cardio_day = [
-                    Exercise(name="Cardio Moderado (Caminata/Bici)", sets=1, reps="35 min", rest_seconds=0, muscle_group="Cardio", notes="Zona 2: conversación posible"),
-                    Exercise(name="Plank",                           sets=4, reps="45 seg", rest_seconds=30, muscle_group="Core"),
-                    Exercise(name="Superman",                        sets=3, reps="15",     rest_seconds=30, muscle_group="Lumbar"),
-                ]
+                mobility = _filter_exercises(
+                    ca_pool + cb_pool,
+                    ["movilidad", "estiramientos", "caminata", "bici", "cardio"],
+                )
                 days = [
-                    WorkoutDay(day_number=1, day_name="Día 1 — Inferior + Core", focus="Piernas, Core",        exercises=ca[:3] + cb[2:4]),
-                    WorkoutDay(day_number=2, day_name="Día 2 — Superior Push",   focus="Pecho, Hombros",       exercises=ca[1:4]),
-                    WorkoutDay(day_number=3, day_name="Día 3 — Superior Pull",   focus="Espalda, Bíceps",      exercises=ca[3:5] + cb[3:5]),
-                    WorkoutDay(day_number=4, day_name="Día 4 — Full Body A",     focus="Full Body + Cardio",   exercises=ca),
-                    WorkoutDay(day_number=5, day_name="Día 5 — Full Body B",     focus="Full Body + HIIT",     exercises=cb),
-                    WorkoutDay(day_number=6, day_name="Día 6 — Cardio + Core",   focus="Cardio, Movilidad",    exercises=cardio_day),
+                    _build_workout_day(1, "DÃ­a 1 â€” Piernas y GlÃºteos", "Piernas, GlÃºteos", lower_focus[:6]),
+                    _build_workout_day(2, "DÃ­a 2 â€” Pecho y TrÃ­ceps", "Pecho, TrÃ­ceps", chest_triceps[:5]),
+                    _build_workout_day(3, "DÃ­a 3 â€” Espalda y BÃ­ceps", "Espalda, BÃ­ceps", back_biceps[:3] + biceps_only[:2]),
+                    _build_workout_day(4, "DÃ­a 4 â€” Cuerpo Completo A", "Full body + cardio", cardio_live[:3] + lower_focus[:2] + chest_triceps[:1]),
+                    _build_workout_day(5, "DÃ­a 5 â€” Cuerpo Completo B", "Full body + HIIT", cardio_live[1:4] + back_biceps[:2] + core_focus[:1]),
+                    _build_workout_day(6, "DÃ­a 6 â€” Abdomen, Cardio y Movilidad", "RecuperaciÃ³n activa", cardio_live[:3] + core_focus[:2] + mobility_focus[:2]),
                 ]
 
             return TrainingPlan(
                 goal=goal, frequency_level=freq_label[frequency],
                 days_per_week=days_per_week, imc=imc, imc_category=imc_category,
-                intensity=intensity, plan_type="Metabólico",
+                intensity=intensity, plan_type="MetabÃ³lico",
                 description=desc, days=days, variant=variant_label,
             )
 
         if use_low_impact:
             variantes["A"] = _fat_loss_plan(FAT_LOSS_LOW_IMPACT_A, FAT_LOSS_LOW_IMPACT_B, "A",
-                "Plan metabólico de bajo impacto. Ejercicios articular-seguros que elevan el gasto calórico sin sobrecargar rodillas y espalda.", "Moderada")
+                "Plan metabÃ³lico de bajo impacto. Ejercicios articular-seguros que elevan el gasto calÃ³rico sin sobrecargar rodillas y espalda.", "Moderada")
             variantes["B"] = _fat_loss_plan(FAT_LOSS_LOW_IMPACT_B, FAT_LOSS_LOW_IMPACT_C, "B",
-                "Plan bajo impacto con mayor énfasis en glúteos y cadena posterior. Introduce carga progresiva en cada sesión.", "Moderada")
+                "Plan bajo impacto con mayor Ã©nfasis en glÃºteos y cadena posterior. Introduce carga progresiva en cada sesiÃ³n.", "Moderada")
             variantes["C"] = _fat_loss_plan(FAT_LOSS_LOW_IMPACT_C, FAT_LOSS_LOW_IMPACT_A, "C",
-                "Plan bajo impacto con mancuernas y bandas. Más variedad de movimientos para evitar adaptación.", "Moderada")
+                "Plan bajo impacto con mancuernas y bandas. MÃ¡s variedad de movimientos para evitar adaptaciÃ³n.", "Moderada")
         else:
             int_label = "Moderada-Alta" if imc_category == "Sobrepeso" else "Alta"
             variantes["A"] = _fat_loss_plan(FAT_LOSS_CIRCUIT_A, FAT_LOSS_CIRCUIT_B, "A",
-                "Circuito metabólico clásico: ejercicios funcionales con descansos cortos. Máxima quema calórica en poco tiempo.", int_label)
+                "Circuito metabÃ³lico clÃ¡sico: ejercicios funcionales con descansos cortos. MÃ¡xima quema calÃ³rica en poco tiempo.", int_label)
             variantes["B"] = _fat_loss_plan(FAT_LOSS_CIRCUIT_B, FAT_LOSS_CIRCUIT_A, "B",
-                "Circuito con mayor énfasis en tren inferior y glúteos. Ideal si quieres también tonificar piernas.", int_label)
+                "Circuito con mayor Ã©nfasis en tren inferior y glÃºteos. Ideal si quieres tambiÃ©n tonificar piernas.", int_label)
             variantes["C"] = _fat_loss_plan(FAT_LOSS_CIRCUIT_C, FAT_LOSS_CIRCUIT_A, "C",
-                "Híbrido fuerza-cardio: ejercicios compuestos a ritmo alto más intervalos de sprint. Preserva más músculo.", int_label)
+                "HÃ­brido fuerza-cardio: ejercicios compuestos a ritmo alto mÃ¡s intervalos de sprint. Preserva mÃ¡s mÃºsculo.", int_label)
 
-    # ══════════════════════════════════════
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     #  MANTENIMIENTO
-    # ══════════════════════════════════════
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     else:
         use_underweight = (imc_category == "Bajo peso")
 
         def _maintenance_plan(fa, fb, variant_label, desc, intensity):
-            fa = _adapt_list(fa, imc_category)
-            fb = _adapt_list(fb, imc_category)
+            fa_pool = _prepare_exercise_pool(fa, imc_category)
+            fb_pool = _prepare_exercise_pool(fb, imc_category)
+
+            upper_push = _filter_exercises(
+                fa_pool + fb_pool,
+                ["pecho", "press", "flexion", "flexiones", "hombro", "trÃ­ceps", "triceps"],
+            )
+            chest_triceps = _filter_exercises(
+                fa_pool + fb_pool,
+                ["pecho", "flexion", "flexiones", "trÃ­ceps", "triceps", "diamante", "cerradas", "fondos"],
+            )
+            back_biceps = _filter_exercises(
+                fa_pool + fb_pool,
+                ["espalda", "remo", "jalÃ³n", "jalon", "dominadas", "peso muerto", "cadena posterior"],
+            )
+            biceps_only = _filter_exercises(
+                fa_pool + fb_pool,
+                ["bÃ­ceps", "biceps", "curl", "braquial"],
+            )
+            upper_pull = _filter_exercises(
+                fa_pool + fb_pool,
+                ["espalda", "remo", "jalÃ³n", "jalon", "dominadas", "bÃ­ceps", "biceps", "curl", "trapecio", "peso muerto", "cadena posterior"],
+            )
+            lower_focus = _filter_exercises(
+                fa_pool + fb_pool,
+                ["pierna", "sentadilla", "zancada", "peso muerto", "glÃºteos", "gluteos", "hip thrust", "gemelos", "cuÃ¡driceps", "cuadriceps"],
+            )
+            core_focus = _filter_exercises(
+                fa_pool + fb_pool,
+                ["core", "plank", "plancha", "abdominal", "rotaciÃ³n", "rotacion"],
+            )
+            mobility = _filter_exercises(
+                fa_pool + fb_pool,
+                ["movilidad", "estiramientos", "cardio", "caminata", "bici"],
+            )
 
             if days_per_week == 2:
                 days = [
-                    WorkoutDay(day_number=1, day_name="Día 1 — Full Body A", focus="Piernas, Pecho, Espalda",       exercises=fa),
-                    WorkoutDay(day_number=2, day_name="Día 2 — Full Body B", focus="Cadena Posterior, Core",         exercises=fb),
+                    _build_workout_day(1, "DÃ­a 1 â€” Cuerpo Completo A", "Piernas, Pecho, Espalda, Core", lower_focus[:3] + upper_push[:2] + upper_pull[:2]),
+                    _build_workout_day(2, "DÃ­a 2 â€” Cuerpo Completo B", "Cadena Posterior, Hombros, Core", lower_focus[2:5] + upper_push[2:4] + core_focus[:2]),
                 ]
             elif days_per_week == 4:
                 days = [
-                    WorkoutDay(day_number=1, day_name="Día 1 — Full Body A",  focus="Piernas, Empuje, Tirón",     exercises=fa),
-                    WorkoutDay(day_number=2, day_name="Día 2 — Full Body B",  focus="Cadena Posterior, Core",     exercises=fb),
-                    WorkoutDay(day_number=3, day_name="Día 3 — Upper Focus",  focus="Pecho, Espalda, Hombros",    exercises=fa[1:4] + fb[1:3]),
-                    WorkoutDay(day_number=4, day_name="Día 4 — Lower + Core", focus="Piernas, Glúteos, Core",     exercises=fb[:2] + fa[:2] + [fb[-1]]),
+                    _build_workout_day(1, "DÃ­a 1 â€” Pecho y TrÃ­ceps", "Pecho, TrÃ­ceps", chest_triceps[:5]),
+                    _build_workout_day(2, "DÃ­a 2 â€” Piernas y GlÃºteos", "Piernas, GlÃºteos, Gemelos", lower_focus[:5]),
+                    _build_workout_day(3, "DÃ­a 3 â€” Espalda y BÃ­ceps", "Espalda, BÃ­ceps, Trapecio", back_biceps[:3] + biceps_only[:2]),
+                    _build_workout_day(4, "DÃ­a 4 â€” Abdomen y Movilidad", "Core, Cardio, RecuperaciÃ³n", core_focus[:2] + mobility[:3]),
                 ]
             else:
                 days = [
-                    WorkoutDay(day_number=1, day_name="Día 1 — Full Body A",        focus="Piernas, Pecho, Espalda",    exercises=fa),
-                    WorkoutDay(day_number=2, day_name="Día 2 — Full Body B",        focus="Cadena Posterior, Core",     exercises=fb),
-                    WorkoutDay(day_number=3, day_name="Día 3 — Upper A",            focus="Pecho, Hombros, Tríceps",    exercises=fa[1:]),
-                    WorkoutDay(day_number=4, day_name="Día 4 — Lower A",            focus="Piernas, Glúteos",           exercises=fb[:2] + fa[:1]),
-                    WorkoutDay(day_number=5, day_name="Día 5 — Upper B",            focus="Espalda, Bíceps, Core",      exercises=fb[1:]),
-                    WorkoutDay(day_number=6, day_name="Día 6 — Cardio + Movilidad", focus="Cardio, Flexibilidad",       exercises=[
-                        Exercise(name="Cardio Moderado", sets=1, reps="30 min", rest_seconds=0, muscle_group="Cardio"),
-                        Exercise(name="Estiramientos Dinámicos", sets=1, reps="10 min", rest_seconds=0, muscle_group="Movilidad"),
-                        Exercise(name="Plank", sets=3, reps="45 seg", rest_seconds=30, muscle_group="Core"),
-                    ]),
+                    _build_workout_day(1, "DÃ­a 1 â€” Pecho y TrÃ­ceps", "Pecho, TrÃ­ceps", chest_triceps[:5]),
+                    _build_workout_day(2, "DÃ­a 2 â€” Espalda y BÃ­ceps", "Espalda, BÃ­ceps, Trapecio", back_biceps[:3] + biceps_only[:2]),
+                    _build_workout_day(3, "DÃ­a 3 â€” Piernas y GlÃºteos", "CuÃ¡driceps, GlÃºteos, Isquios, Gemelos", lower_focus[:6]),
+                    _build_workout_day(4, "DÃ­a 4 â€” Hombros y Tren Superior", "Pecho, Espalda, Hombros", upper_push[:3] + upper_pull[:3]),
+                    _build_workout_day(5, "DÃ­a 5 â€” Piernas y Abdomen", "Piernas, Core", lower_focus[:4] + core_focus[:2]),
+                    _build_workout_day(6, "DÃ­a 6 â€” Cardio y Movilidad", "Cardio, Movilidad", mobility[:3] + core_focus[:1]),
                 ]
 
             return TrainingPlan(
@@ -605,21 +815,21 @@ def build_plans(
         if use_underweight:
             int_label = "Moderada-Alta"
             variantes["A"] = _maintenance_plan(MAINTENANCE_UNDERWEIGHT_A, MAINTENANCE_UNDERWEIGHT_B, "A",
-                "Recomposición corporal: ejercicios compuestos con barra para ganar fuerza y masa desde bajo peso.", int_label)
+                "RecomposiciÃ³n corporal: ejercicios compuestos con barra para ganar fuerza y masa desde bajo peso.", int_label)
             variantes["B"] = _maintenance_plan(MAINTENANCE_UNDERWEIGHT_B, MAINTENANCE_UNDERWEIGHT_C, "B",
-                "Énfasis en peso muerto y movimientos de cadena posterior. Construye base de fuerza real.", int_label)
+                "Ã‰nfasis en peso muerto y movimientos de cadena posterior. Construye base de fuerza real.", int_label)
             variantes["C"] = _maintenance_plan(MAINTENANCE_UNDERWEIGHT_C, MAINTENANCE_UNDERWEIGHT_A, "C",
-                "Variante con sentadilla frontal y movimientos de mayor rango. Mayor activación muscular total.", int_label)
+                "Variante con sentadilla frontal y movimientos de mayor rango. Mayor activaciÃ³n muscular total.", int_label)
         else:
             int_label = "Moderada" if imc_category != "Sobrepeso" else "Moderada-Alta"
             variantes["A"] = _maintenance_plan(MAINTENANCE_FULL_A, MAINTENANCE_FULL_B, "A",
-                "Mantenimiento clásico: ejercicios compuestos con barra. Fuerza funcional y composición estable.", int_label)
+                "Mantenimiento clÃ¡sico: ejercicios compuestos con barra. Fuerza funcional y composiciÃ³n estable.", int_label)
             variantes["B"] = _maintenance_plan(MAINTENANCE_FULL_B, MAINTENANCE_FULL_C, "B",
-                "Mayor énfasis en cadena posterior y core. Equilibrio entre fuerza y movilidad.", int_label)
+                "Mayor Ã©nfasis en cadena posterior y core. Equilibrio entre fuerza y movilidad.", int_label)
             variantes["C"] = _maintenance_plan(MAINTENANCE_FULL_C, MAINTENANCE_FULL_A, "C",
-                "Variante con mancuernas y peso corporal. Más accesible y con mayor rango de movimiento.", int_label)
+                "Variante con mancuernas y peso corporal. MÃ¡s accesible y con mayor rango de movimiento.", int_label)
 
-    # ── Descripción de variantes para Groq ──────────────────────────────────
+    # â”€â”€ DescripciÃ³n de variantes para Groq â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     variantes_desc = {k: v.description for k, v in variantes.items()}
 
     recomendacion = get_groq_recommendation(
@@ -634,7 +844,7 @@ def build_plans(
     }
 
 
-# ── Compatibilidad con el router existente (sigue funcionando si alguien llama build_plan) ──
+# â”€â”€ Compatibilidad con el router existente (sigue funcionando si alguien llama build_plan) â”€â”€
 def build_plan(
     goal: str,
     frequency: str,
@@ -690,10 +900,55 @@ def _extract_reps_target_value(reps_target: str | None) -> Optional[int]:
     match = re.search(r"\d+", text)
     if not match:
         return None
-    return int(match.group(0))
+    value = int(match.group(0))
+    if "min" in text:
+        return value * 60
+    return value
 
 
-def _exercise_to_payload(exercise: TrainingExerciseProgress) -> dict:
+def _exercise_plan_entry(plan_payload: dict, day_number: int, exercise_order: int) -> Optional[dict]:
+    days = plan_payload.get("days") or []
+    for day in days:
+        if int(day.get("day_number", 0) or 0) != day_number:
+            continue
+        exercises = day.get("exercises") or []
+        if 1 <= exercise_order <= len(exercises):
+            return exercises[exercise_order - 1] or {}
+    return None
+
+
+def _exercise_rest_seconds(plan_payload: dict, day_number: int, exercise_order: int) -> Optional[int]:
+    exercise = _exercise_plan_entry(plan_payload, day_number, exercise_order)
+    if exercise is None:
+        return None
+    return exercise.get("rest_seconds")
+
+
+def _exercise_mode_from_plan(plan_payload: dict, day_number: int, exercise_order: int) -> str:
+    exercise = _exercise_plan_entry(plan_payload, day_number, exercise_order)
+    if exercise is None:
+        return "reps"
+
+    explicit_mode = exercise.get("mode")
+    if explicit_mode in {"reps", "timer", "hold"}:
+        return explicit_mode
+
+    text = " ".join(
+        part for part in [
+            str(exercise.get("name", "")),
+            str(exercise.get("muscle_group", "")),
+            str(exercise.get("reps", "")),
+            str(exercise.get("notes", "")),
+        ] if part
+    ).lower()
+    if any(token in text for token in ("seg", "min", "plank", "plancha", "sprint", "cardio", "marcha", "caminata", "bici", "movilidad", "hiit")):
+        return "timer"
+    if "hold" in text or "isometr" in text:
+        return "hold"
+    return "reps"
+
+
+def _exercise_to_payload(exercise: TrainingExerciseProgress, rest_seconds: Optional[int] = None, mode: str = "reps") -> dict:
     current_set = exercise.sets_target if exercise.status == "completed" else min(exercise.sets_completed + 1, exercise.sets_target)
     return {
         "id": exercise.id,
@@ -706,6 +961,8 @@ def _exercise_to_payload(exercise: TrainingExerciseProgress) -> dict:
         "sets_completed": exercise.sets_completed,
         "reps_completed_current_set": exercise.reps_completed_current_set,
         "current_set": current_set,
+        "rest_seconds": rest_seconds,
+        "mode": mode,
         "status": exercise.status,
         "started_at": exercise.started_at,
         "completed_at": exercise.completed_at,
@@ -713,18 +970,162 @@ def _exercise_to_payload(exercise: TrainingExerciseProgress) -> dict:
 
 
 def _day_to_payload(
+    selection: TrainingPlanSelection,
     routine: TrainingRoutineProgress,
     exercises: list[TrainingExerciseProgress],
 ) -> dict:
     current_exercise = _resolve_current_exercise(exercises)
-    completed_count = sum(1 for exercise in exercises if exercise.status == "completed")
+    summary = _build_session_summary(routine, exercises)
+    plan_payload = selection.plan_payload or {}
     return {
         **_routine_to_payload(routine),
-        "day_id": routine.id,
-        "completed_exercises_count": completed_count,
-        "current_exercise": _exercise_to_payload(current_exercise) if current_exercise else None,
-        "exercises": [_exercise_to_payload(exercise) for exercise in exercises],
+        "day_id": routine.day_number,
+        "routine_id": routine.id,
+        "plan_day_number": routine.day_number,
+        "completed_exercises_count": summary["completed_exercises"],
+        "total_exercises": summary["total_exercises"],
+        "total_sets_target": summary["total_sets"],
+        "total_sets_completed": summary["completed_sets"],
+        "total_reps_completed": summary["total_reps"],
+        "progress_pct": summary["progress_pct"],
+        "current_exercise": (
+            _exercise_to_payload(
+                current_exercise,
+                _exercise_rest_seconds(plan_payload, routine.day_number, current_exercise.exercise_order),
+                _exercise_mode_from_plan(plan_payload, routine.day_number, current_exercise.exercise_order),
+            )
+            if current_exercise
+            else None
+        ),
+        "exercises": [
+            _exercise_to_payload(
+                exercise,
+                _exercise_rest_seconds(plan_payload, routine.day_number, exercise.exercise_order),
+                _exercise_mode_from_plan(plan_payload, routine.day_number, exercise.exercise_order),
+            )
+            for exercise in exercises
+        ],
+        "session_summary": summary,
     }
+
+
+def _exercise_total_reps_completed(exercise: TrainingExerciseProgress) -> int:
+    reps_target = exercise.reps_target_value or 0
+    completed_sets = min(exercise.sets_completed or 0, exercise.sets_target or 0)
+    current_reps = max(0, exercise.reps_completed_current_set or 0)
+    return (completed_sets * reps_target) + current_reps
+
+
+def _exercise_mode_from_progress(exercise: TrainingExerciseProgress) -> str:
+    text = " ".join(
+        part for part in [exercise.exercise_name, exercise.reps_target] if part
+    ).lower()
+    if any(token in text for token in ("seg", "min", "plank", "plancha", "sprint", "cardio", "marcha", "caminata", "bici", "movilidad", "hiit")):
+        return "timer"
+    if "hold" in text or "isometr" in text:
+        return "hold"
+    return "reps"
+
+
+def _build_session_summary(
+    routine: TrainingRoutineProgress,
+    exercises: list[TrainingExerciseProgress],
+) -> dict:
+    total_exercises = len(exercises)
+    completed_exercises = sum(1 for exercise in exercises if exercise.status == "completed")
+    time_based_exercises = sum(1 for exercise in exercises if _exercise_mode_from_progress(exercise) == "timer")
+    total_sets = sum(exercise.sets_target or 0 for exercise in exercises)
+    completed_sets = sum(min(exercise.sets_completed or 0, exercise.sets_target or 0) for exercise in exercises)
+    total_reps = sum(_exercise_total_reps_completed(exercise) for exercise in exercises)
+    total_time_seconds = sum(
+        (exercise.sets_target or 0) * (exercise.reps_target_value or 0)
+        for exercise in exercises
+        if _exercise_mode_from_progress(exercise) == "timer"
+    )
+    completed_time_seconds = sum(
+        _exercise_total_reps_completed(exercise)
+        for exercise in exercises
+        if _exercise_mode_from_progress(exercise) == "timer"
+    )
+    progress_pct = round((completed_exercises / max(1, total_exercises)) * 100, 1)
+    started_at = routine.started_at
+    completed_at = routine.completed_at
+    duration_seconds = None
+    if started_at and completed_at:
+        duration_seconds = max(0, int((completed_at - started_at).total_seconds()))
+
+    return {
+        "day_completed": routine.status == "completed",
+        "day_number": routine.day_number,
+        "day_name": routine.day_name,
+        "total_exercises": total_exercises,
+        "completed_exercises": completed_exercises,
+        "time_based_exercises": time_based_exercises,
+        "total_sets": total_sets,
+        "completed_sets": completed_sets,
+        "total_reps": total_reps,
+        "total_time_seconds": total_time_seconds,
+        "completed_time_seconds": completed_time_seconds,
+        "progress_pct": progress_pct,
+        "started_at": started_at,
+        "completed_at": completed_at,
+        "duration_seconds": duration_seconds,
+    }
+
+
+def _event_exists(
+    db: Session,
+    user: User,
+    day_number: int,
+    event_type: str,
+    client_event_id: Optional[UUID],
+) -> bool:
+    if client_event_id is None:
+        return False
+
+    return (
+        db.query(TrainingExerciseEvent.id)
+        .filter(
+            TrainingExerciseEvent.user_id == user.id,
+            TrainingExerciseEvent.day_number == day_number,
+            TrainingExerciseEvent.event_type == event_type,
+            TrainingExerciseEvent.client_event_id == client_event_id,
+        )
+        .first()
+        is not None
+    )
+
+
+def _register_event(
+    db: Session,
+    selection: TrainingPlanSelection,
+    routine: TrainingRoutineProgress,
+    exercise: TrainingExerciseProgress,
+    user: User,
+    event_type: str,
+    client_event_id: Optional[UUID] = None,
+    reps_delta: Optional[int] = None,
+    sets_delta: Optional[int] = None,
+    payload: Optional[dict] = None,
+) -> bool:
+    if _event_exists(db, user, routine.day_number, event_type, client_event_id):
+        return False
+
+    db.add(
+        TrainingExerciseEvent(
+            training_plan_id=selection.id,
+            training_routine_id=routine.id,
+            training_exercise_id=exercise.id,
+            user_id=user.id,
+            day_number=routine.day_number,
+            event_type=event_type,
+            client_event_id=client_event_id,
+            reps_delta=reps_delta,
+            sets_delta=sets_delta,
+            payload=payload or {},
+        )
+    )
+    return True
 
 
 def _get_day_routine(db: Session, selection_id: int, day_number: int) -> Optional[TrainingRoutineProgress]:
@@ -905,7 +1306,7 @@ def build_current_plan_response(db: Session, user: User) -> dict:
     current_day_payload = None
     if current_routine:
         exercises = _get_day_exercises(db, selection.id, current_routine.day_number)
-        current_day_payload = _day_to_payload(current_routine, exercises)
+        current_day_payload = _day_to_payload(selection, current_routine, exercises)
 
     return {
         "plan": {
@@ -935,14 +1336,18 @@ def build_routines_progress_response(db: Session, user: User) -> dict:
     routines_payload = []
     for routine in routines:
         exercises = _get_day_exercises(db, selection.id, routine.day_number)
-        routines_payload.append(_day_to_payload(routine, exercises))
+        routines_payload.append(_day_to_payload(selection, routine, exercises))
 
     return {
         "plan_id": selection.id,
         "plan_variant": selection.plan_variant,
         "frequency": selection.frequency,
         "routines": routines_payload,
-        "current_day": _day_to_payload(current_routine, _get_day_exercises(db, selection.id, current_routine.day_number)) if current_routine else None,
+        "current_day": _day_to_payload(
+            selection,
+            current_routine,
+            _get_day_exercises(db, selection.id, current_routine.day_number),
+        ) if current_routine else None,
     }
 
 
@@ -958,14 +1363,19 @@ def build_day_progress_response(db: Session, user: User, day_number: int) -> dic
     if routine is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Rutina no encontrada para el día solicitado.",
+            detail="Rutina no encontrada para el dÃ­a solicitado.",
         )
 
     exercises = _get_day_exercises(db, selection.id, day_number)
-    return _day_to_payload(routine, exercises)
+    return _day_to_payload(selection, routine, exercises)
 
 
-def start_routine_day(db: Session, user: User, day_number: int) -> TrainingRoutineProgress:
+def start_routine_day(
+    db: Session,
+    user: User,
+    day_number: int,
+    client_event_id: Optional[UUID] = None,
+) -> TrainingRoutineProgress:
     selection = get_active_training_plan(db, user)
     if selection is None:
         raise HTTPException(
@@ -984,13 +1394,14 @@ def start_routine_day(db: Session, user: User, day_number: int) -> TrainingRouti
     if routine is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Rutina no encontrada para el día solicitado.",
+            detail="Rutina no encontrada para el dÃ­a solicitado.",
         )
     if routine.status == "completed":
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="La rutina ya fue completada.",
-        )
+        return routine
+
+    if _event_exists(db, user, day_number, "routine_start", client_event_id):
+        return routine
+
     if routine.status != "in_progress":
         routine.status = "in_progress"
         routine.started_at = routine.started_at or datetime.utcnow()
@@ -1001,6 +1412,17 @@ def start_routine_day(db: Session, user: User, day_number: int) -> TrainingRouti
         first_exercise.status = "in_progress"
         first_exercise.started_at = first_exercise.started_at or datetime.utcnow()
         first_exercise.updated_at = datetime.utcnow()
+    if first_exercise is not None:
+        _register_event(
+            db=db,
+            selection=selection,
+            routine=routine,
+            exercise=first_exercise,
+            user=user,
+            event_type="routine_start",
+            client_event_id=client_event_id,
+            payload={"day_number": day_number},
+        )
     db.commit()
     db.refresh(routine)
     return routine
@@ -1047,6 +1469,7 @@ def add_reps_to_current_exercise(
     user: User,
     day_number: int,
     reps_count: int,
+    client_event_id: Optional[UUID] = None,
 ) -> TrainingExerciseProgress:
     selection = get_active_training_plan(db, user)
     if selection is None:
@@ -1059,7 +1482,7 @@ def add_reps_to_current_exercise(
     if routine is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Rutina no encontrada para el día solicitado.",
+            detail="Rutina no encontrada para el dÃ­a solicitado.",
         )
 
     exercises = _get_day_exercises(db, selection.id, day_number)
@@ -1069,11 +1492,10 @@ def add_reps_to_current_exercise(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No hay ejercicio activo para esta rutina.",
         )
+    if _event_exists(db, user, day_number, "rep", client_event_id):
+        return current_exercise
     if current_exercise.status == "completed":
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="El ejercicio ya fue completado.",
-        )
+        return current_exercise
 
     if routine.status != "in_progress":
         routine.status = "in_progress"
@@ -1086,6 +1508,17 @@ def add_reps_to_current_exercise(
     current_exercise.reps_completed_current_set += reps_count
     current_exercise.updated_at = datetime.utcnow()
     routine.updated_at = datetime.utcnow()
+    _register_event(
+        db=db,
+        selection=selection,
+        routine=routine,
+        exercise=current_exercise,
+        user=user,
+        event_type="rep",
+        client_event_id=client_event_id,
+        reps_delta=reps_count,
+        payload={"day_number": day_number, "reps_count": reps_count},
+    )
 
     db.commit()
     db.refresh(current_exercise)
@@ -1096,6 +1529,17 @@ def complete_current_set(
     db: Session,
     user: User,
     day_number: int,
+    exercise_id: Optional[int] = None,
+    exercise_name: Optional[str] = None,
+    exercise_mode: Optional[str] = None,
+    tracking_mode: Optional[str] = None,
+    current_set: Optional[int] = None,
+    sets_target: Optional[int] = None,
+    reps_completed_current_set: Optional[int] = None,
+    reps_target_value: Optional[int] = None,
+    duration_seconds: Optional[int] = None,
+    seconds_elapsed: Optional[int] = None,
+    client_event_id: Optional[UUID] = None,
 ) -> dict:
     selection = get_active_training_plan(db, user)
     if selection is None:
@@ -1108,7 +1552,7 @@ def complete_current_set(
     if routine is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Rutina no encontrada para el día solicitado.",
+            detail="Rutina no encontrada para el dÃ­a solicitado.",
         )
 
     exercises = _get_day_exercises(db, selection.id, day_number)
@@ -1118,17 +1562,41 @@ def complete_current_set(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No hay ejercicio activo para esta rutina.",
         )
-    if current_exercise.status == "completed":
+    if exercise_id is not None and current_exercise.id != exercise_id:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="El ejercicio ya fue completado.",
+            detail="El exercise_id enviado no coincide con el ejercicio actual.",
         )
+    if exercise_name is not None and current_exercise.exercise_name != exercise_name:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="El exercise_name enviado no coincide con el ejercicio actual.",
+        )
+    if _event_exists(db, user, day_number, "set_complete", client_event_id):
+        return {
+            "routine": routine,
+            "current_exercise": current_exercise,
+            "exercises": exercises,
+        }
+    if current_exercise.status == "completed":
+        return {
+            "routine": routine,
+            "current_exercise": current_exercise,
+            "exercises": exercises,
+        }
 
     if current_exercise.reps_target_value is not None and current_exercise.reps_completed_current_set < current_exercise.reps_target_value:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Aún no se completó el objetivo de reps de la serie actual.",
+            detail="AÃºn no se completÃ³ el objetivo de reps de la serie actual.",
         )
+
+    if routine.status != "in_progress":
+        routine.status = "in_progress"
+        routine.started_at = routine.started_at or datetime.utcnow()
+    if current_exercise.status == "pending":
+        current_exercise.status = "in_progress"
+        current_exercise.started_at = current_exercise.started_at or datetime.utcnow()
 
     current_exercise.sets_completed += 1
     current_exercise.reps_completed_current_set = 0
@@ -1147,6 +1615,29 @@ def complete_current_set(
     routine.completed_exercises_count = sum(1 for exercise in exercises if exercise.status == "completed")
     routine.total_exercises = len(exercises)
     routine.updated_at = datetime.utcnow()
+    _register_event(
+        db=db,
+        selection=selection,
+        routine=routine,
+        exercise=current_exercise,
+        user=user,
+        event_type="set_complete",
+        client_event_id=client_event_id,
+        sets_delta=1,
+        payload={
+            "day_number": day_number,
+            "exercise_id": exercise_id,
+            "exercise_name": exercise_name,
+            "exercise_mode": exercise_mode,
+            "tracking_mode": tracking_mode,
+            "current_set": current_set,
+            "sets_target": sets_target,
+            "reps_completed_current_set": reps_completed_current_set,
+            "reps_target_value": reps_target_value,
+            "duration_seconds": duration_seconds,
+            "seconds_elapsed": seconds_elapsed,
+        },
+    )
 
     db.commit()
     db.refresh(current_exercise)
@@ -1166,6 +1657,7 @@ def complete_routine_day(
     completed_exercises_count: Optional[int] = None,
     total_exercises: Optional[int] = None,
     force: bool = False,
+    client_event_id: Optional[UUID] = None,
 ) -> TrainingRoutineProgress:
     selection = get_active_training_plan(db, user)
     if selection is None:
@@ -1185,19 +1677,24 @@ def complete_routine_day(
     if routine is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Rutina no encontrada para el día solicitado.",
+            detail="Rutina no encontrada para el dÃ­a solicitado.",
         )
+    if _event_exists(db, user, day_number, "routine_complete", client_event_id):
+        return routine
+    if routine.status == "completed":
+        return routine
+
     exercises = _get_day_exercises(db, selection.id, day_number)
     if not exercises:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No se encontraron ejercicios para este día.",
+            detail="No se encontraron ejercicios para este dÃ­a.",
         )
 
     if not force and not all(exercise.status == "completed" for exercise in exercises):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Todavía quedan ejercicios pendientes en este día.",
+            detail="TodavÃ­a quedan ejercicios pendientes en este dÃ­a.",
         )
 
     routine.status = "completed"
@@ -1210,6 +1707,20 @@ def complete_routine_day(
     )
     routine.total_exercises = total_exercises if total_exercises is not None else len(exercises)
     routine.updated_at = datetime.utcnow()
+    _register_event(
+        db=db,
+        selection=selection,
+        routine=routine,
+        exercise=_resolve_current_exercise(exercises) or exercises[-1],
+        user=user,
+        event_type="routine_complete",
+        client_event_id=client_event_id,
+        payload={
+            "day_number": day_number,
+            "completed_exercises_count": routine.completed_exercises_count,
+            "total_exercises": routine.total_exercises,
+        },
+    )
     db.commit()
     db.refresh(routine)
     return routine

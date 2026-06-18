@@ -5,13 +5,12 @@ export function useHandGesture({ videoRef, isRunning }) {
   const landmarkerRef = useRef(null)
   const frameRequestRef = useRef(0)
   const lastVideoTimeRef = useRef(-1)
-  const stableOkFramesRef = useRef(0)
-
   const [status, setStatus] = useState('loading')
   const [error, setError] = useState('')
   const [isOkGesture, setIsOkGesture] = useState(false)
   const [gestureConfidence, setGestureConfidence] = useState(0)
 
+  const stableOkFramesRef = useRef(0)
   useEffect(() => {
     let cancelled = false
 
@@ -46,7 +45,7 @@ export function useHandGesture({ videoRef, isRunning }) {
   }, [])
 
   useEffect(() => {
-    if (!isRunning || !landmarkerRef.current) {
+    if (!isRunning || status !== 'ready' || !landmarkerRef.current) {
       stableOkFramesRef.current = 0
       queueMicrotask(() => {
         setIsOkGesture(false)
@@ -94,7 +93,7 @@ export function useHandGesture({ videoRef, isRunning }) {
     return () => {
       window.cancelAnimationFrame(frameRequestRef.current)
     }
-  }, [isRunning, videoRef])
+  }, [isRunning, status, videoRef])
 
   return {
     status,

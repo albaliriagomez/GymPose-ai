@@ -35,7 +35,7 @@ export function drawPoseLandmarks(ctx, poseLandmarkerResult, width, height, exer
   ctx.clearRect(0, 0, width, height)
 
   const poses = poseLandmarkerResult?.landmarks ?? []
-  const armMode = exerciseMode === 'press' || exerciseMode === 'curl'
+  const armMode = exerciseMode === 'press' || exerciseMode === 'curl' || exerciseMode === 'russian' || exerciseMode === 'row'
   const connections = armMode ? BICEP_CONNECTIONS : POSE_CONNECTIONS
   const keypoints = armMode ? BICEP_KEYPOINTS : SQUAT_KEYPOINTS
 
